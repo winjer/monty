@@ -1,8 +1,12 @@
-use rustpython_parser::ast::{Boolop, Expr as AstExpr, ExprKind, Keyword, Operator as AstOperator, Stmt, StmtKind};
-use rustpython_parser::parse_program;
 use std::borrow::Cow;
 
-use crate::{Expr, Node, Operator};
+use num::ToPrimitive;
+use rustpython_parser::ast::{
+    Boolop, Constant, Expr as AstExpr, ExprKind, Keyword, Operator as AstOperator, Stmt, StmtKind,
+};
+use rustpython_parser::parse_program;
+
+use crate::{Expr, Node, Operator, Value};
 
 pub type ParseResult<T> = Result<T, Cow<'static, str>>;
 
@@ -207,7 +211,7 @@ fn parse_expression(expression: AstExpr) -> ParseResult<ParseExpr> {
             let args = args
                 .into_iter()
                 .map(parse_expression)
-                .collect::<ParseResult<Vec<_>>>()?;
+                .collect::<ParseResult<_>>()?;
             // let kwargs = keywords
             //     .into_iter()
             //     .map(parse_kwargs)
@@ -221,7 +225,7 @@ fn parse_expression(expression: AstExpr) -> ParseResult<ParseExpr> {
             format_spec: _,
         } => todo!("FormattedValue"),
         ExprKind::JoinedStr { values: _ } => todo!("JoinedStr"),
-        ExprKind::Constant { value, .. } => Ok(Expr::Constant(value)),
+        ExprKind::Constant { value, .. } => Ok(Expr::Constant(convert_const(value)?)),
         ExprKind::Attribute {
             value: _,
             attr: _,
@@ -291,4 +295,28 @@ fn convert_bool_op(op: Boolop) -> Operator {
         Boolop::And => Operator::And,
         Boolop::Or => Operator::Or,
     }
+}
+
+fn convert_const(c: Constant) -> ParseResult<Value> {
+    let v = match c {
+        Constant::None => Value::None,
+        Constant::Bool(b) => match b {
+            true => Value::True,
+            false => Value::False,
+        },
+        Constant::Str(s) => Value::Str(s),
+        Constant::Bytes(b) => Value::Bytes(b),
+        Constant::Int(big_int) => match big_int.to_i64() {
+            Some(i) => Value::Int(i),
+            None => return Err(format!("int {big_int} too big").into()),
+        },
+        Constant::Tuple(tuple) => {
+            let t = tuple.into_iter().map(convert_const).collect::<ParseResult<_>>()?;
+            Value::Tuple(t)
+        }
+        Constant::Float(f) => Value::Float(f),
+        Constant::Complex { .. } => return Err("complex constants not supported".into()),
+        Constant::Ellipsis => Value::Ellipsis,
+    };
+    Ok(v)
 }

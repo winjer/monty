@@ -24,13 +24,16 @@ impl Default for Value {
 #[derive(Debug, Clone)]
 enum Value {
     Undefined,
+    Ellipsis,
     None,
     True,
     False,
     Int(i64),
+    Bytes(Vec<u8>),
     Float(f64),
     Str(String),
     List(Vec<Value>),
+    Tuple(Vec<Value>),
     Range(i64),
 }
 
@@ -55,7 +58,7 @@ enum Operator {
 
 #[derive(Debug, Clone)]
 enum Expr<T, Funcs> {
-    Constant(Constant),
+    Constant(Value),
     Name(T),
     Call {
         func: Funcs,

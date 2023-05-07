@@ -6,3 +6,4 @@ edition = "2021"
 [dependencies]
 rustpython-parser = { git = "https://github.com/charliermarsh/RustPython.git", rev = "c3147d2c1524ebd0e90cf1c2938d770314fd5a5a" }
 ahash = "0.8.0"
+num = "0.4.0"

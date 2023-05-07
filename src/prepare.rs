@@ -5,19 +5,19 @@ use crate::{Expr, Node};
 
 type PrepareResult<T> = Result<T, Cow<'static, str>>;
 
+pub(crate) type RunNode = Node<usize, Builtin>;
+pub(crate) type RunExpr = Expr<usize, Builtin>;
+
 /// TODO:
 /// * pre-calculate const expressions
 /// * const assignment as new type?
-pub(crate) fn prepare(nodes: Vec<Node<String, String>>) -> PrepareResult<(usize, Vec<Node<usize, Builtin>>)> {
+pub(crate) fn prepare(nodes: Vec<Node<String, String>>) -> PrepareResult<(usize, Vec<RunNode>)> {
     let mut namespace = Namespace::new(nodes.len());
     let new_nodes = prepare_nodes(nodes, &mut namespace)?;
     Ok((namespace.names_count, new_nodes))
 }
 
-fn prepare_nodes(
-    nodes: Vec<Node<String, String>>,
-    namespace: &mut Namespace,
-) -> PrepareResult<Vec<Node<usize, Builtin>>> {
+fn prepare_nodes(nodes: Vec<Node<String, String>>, namespace: &mut Namespace) -> PrepareResult<Vec<RunNode>> {
     let mut new_nodes = Vec::with_capacity(nodes.len());
     for node in nodes {
         match node {
@@ -26,7 +26,7 @@ fn prepare_nodes(
                 let expr = prepare_expression(expr, namespace)?;
                 new_nodes.push(Node::Expr(expr));
             }
-            Node::Assign{target, value} => {
+            Node::Assign { target, value } => {
                 let target = namespace.get_id(target);
                 let value = Box::new(prepare_expression(*value, namespace)?);
                 new_nodes.push(Node::Assign { target, value });
@@ -52,7 +52,7 @@ fn prepare_nodes(
     Ok(new_nodes)
 }
 
-fn prepare_expression(expr: Expr<String, String>, namespace: &mut Namespace) -> PrepareResult<Expr<usize, Builtin>> {
+fn prepare_expression(expr: Expr<String, String>, namespace: &mut Namespace) -> PrepareResult<RunExpr> {
     match expr {
         Expr::Constant(value) => Ok(Expr::Constant(value)),
         Expr::Name(name) => Ok(Expr::Name(namespace.get_id(name))),
