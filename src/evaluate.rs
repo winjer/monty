@@ -59,7 +59,7 @@ fn eval_op<'c, 'd>(
     op: &'d Operator,
     right: &'d ExprLoc<'c>,
 ) -> RunResult<'c, Cow<'d, Object>> {
-    let left_object = evaluate(namespace, left)?;
+    let left_object = evaluate(namespace, left)?.into_owned();
     let right_object = evaluate(namespace, right)?;
     let op_object: Option<Object> = match op {
         Operator::Add => left_object.add(&right_object),
@@ -69,7 +69,7 @@ fn eval_op<'c, 'd>(
     };
     match op_object {
         Some(object) => Ok(Cow::Owned(object)),
-        None => Exception::operand_type_error(left, op, right, left_object, right_object),
+        None => Exception::operand_type_error(left, op, right, Cow::Owned(left_object), right_object),
     }
 }
 
@@ -79,18 +79,19 @@ fn cmp_op<'c, 'd>(
     op: &'d CmpOperator,
     right: &'d ExprLoc<'c>,
 ) -> RunResult<'c, bool> {
-    let left_object = evaluate(namespace, left)?;
+    let left_object = evaluate(namespace, left)?.into_owned();
     let right_object = evaluate(namespace, right)?;
+    let left_cow: Cow<Object> = Cow::Owned(left_object);
     match op {
-        CmpOperator::Eq => Ok(left_object.as_ref().py_eq(&right_object)),
-        CmpOperator::NotEq => Ok(!left_object.as_ref().py_eq(&right_object)),
-        CmpOperator::Gt => Ok(left_object.gt(&right_object)),
-        CmpOperator::GtE => Ok(left_object.ge(&right_object)),
-        CmpOperator::Lt => Ok(left_object.lt(&right_object)),
-        CmpOperator::LtE => Ok(left_object.le(&right_object)),
-        CmpOperator::ModEq(v) => match left_object.as_ref().modulus_eq(&right_object, *v) {
+        CmpOperator::Eq => Ok(left_cow.as_ref().py_eq(&right_object)),
+        CmpOperator::NotEq => Ok(!left_cow.as_ref().py_eq(&right_object)),
+        CmpOperator::Gt => Ok(left_cow.gt(&right_object)),
+        CmpOperator::GtE => Ok(left_cow.ge(&right_object)),
+        CmpOperator::Lt => Ok(left_cow.lt(&right_object)),
+        CmpOperator::LtE => Ok(left_cow.le(&right_object)),
+        CmpOperator::ModEq(v) => match left_cow.as_ref().modulus_eq(&right_object, *v) {
             Some(b) => Ok(b),
-            None => Exception::operand_type_error(left, Operator::Mod, right, left_object, right_object),
+            None => Exception::operand_type_error(left, Operator::Mod, right, left_cow, right_object),
         },
         _ => internal_err!(InternalRunError::TodoError; "Operator {op:?} not yet implemented"),
     }
@@ -108,7 +109,10 @@ fn call_function<'c, 'd>(
             return internal_err!(InternalRunError::TodoError; "User defined functions not yet implemented")
         }
     };
-    let args: Vec<Cow<Object>> = args.iter().map(|a| evaluate(namespace, a)).collect::<RunResult<_>>()?;
+    let args: Vec<Cow<Object>> = args
+        .iter()
+        .map(|a| evaluate(namespace, a).map(|o| Cow::Owned(o.into_owned())))
+        .collect::<RunResult<_>>()?;
     builtin.call_function(args)
 }
 
@@ -120,6 +124,12 @@ fn attr_call<'c, 'd>(
     args: &'d [ExprLoc<'c>],
     _kwargs: &'d [Kwarg],
 ) -> RunResult<'c, Cow<'d, Object>> {
+    // Evaluate arguments first to avoid borrow conflicts
+    let args: Vec<Cow<Object>> = args
+        .iter()
+        .map(|a| evaluate(namespace, a).map(|o| Cow::Owned(o.into_owned())))
+        .collect::<RunResult<_>>()?;
+
     let object = if let Some(object) = namespace.get_mut(object_ident.id) {
         match object {
             Object::Undefined => return Err(InternalRunError::Undefined(object_ident.name.clone().into()).into()),
@@ -132,6 +142,5 @@ fn attr_call<'c, 'd>(
             .with_position(expr_loc.position)
             .into());
     };
-    let args: Vec<Cow<Object>> = args.iter().map(|a| evaluate(namespace, a)).collect::<RunResult<_>>()?;
     object.attr_call(attr, args)
 }
