@@ -17,10 +17,10 @@ This document provides a comprehensive technical explanation of the Monty Python
 
 Monty is a **sandboxed Python interpreter** written in Rust. Unlike embedding CPython or using PyO3, Monty implements its own runtime from scratch with these goals:
 
-- **Safety**: Execute untrusted Python code safely without FFI or C dependencies
+- **Safety**: Execute untrusted Python code safely without FFI or C dependencies, instead sandbox will call back to host to run foreign/external functions.
 - **Performance**: Fast execution through compile-time optimizations and efficient memory layout
 - **Simplicity**: Clean, understandable implementation focused on a Python subset
-- **Educational**: Demonstrate interpreter design patterns in Rust
+- **Snapshotting and iteration**: Plan is to allow code to be iteratively executed and snapshotted at each function call
 
 **Key Design Decisions:**
 

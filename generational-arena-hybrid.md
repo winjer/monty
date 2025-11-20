@@ -1,4 +1,4 @@
-# Generational Arena Hybrid Design
+# Arena Hybrid Design
 
 This document outlines the recommended architecture for Monty to achieve Python-compatible reference semantics while maintaining performance and safety.
 
@@ -10,7 +10,7 @@ This document outlines the recommended architecture for Monty to achieve Python-
 - **Immediate values** (Int, Bool, None) stored inline
 - **Heap objects** (List, Str, Dict) allocated in arena with unique IDs
 - **Reference counting** for memory management
-- **Generational indices** for safety (optional enhancement)
+- **Monotonically increasing IDs** (never reused) for simplicity and safety
 
 **Key Benefit**: Enables correct Python behavior for shared mutable state while maintaining performance for common cases.
 
@@ -24,6 +24,7 @@ This document outlines the recommended architecture for Monty to achieve Python-
 | **Python `is` operator** | ❌ Impossible | ❌ Impossible | ✅ Compare IDs |
 | **Mutability** | ⚠️ Mutex overhead | ⚠️ Runtime panics | ✅ Direct mutation |
 | **Performance** | ⚠️ Atomic operations | 🟢 Good | 🟢 Excellent |
+| **Implementation Complexity** | 🟢 Simple | 🟢 Simple | 🟢 Simple (no free list) |
 | **Cache locality** | ❌ Scattered allocations | ❌ Scattered allocations | ✅ Contiguous arena |
 | **GC-ready** | ⚠️ Hard to add cycle detection | ⚠️ Hard to add cycle detection | ✅ All objects in one place |
 | **Debugging** | ⚠️ Hard to inspect | ⚠️ Hard to inspect | ✅ Can dump entire heap |
@@ -44,6 +45,45 @@ assert not (a is b)  # Different objects
 ```
 
 With `Arc<Object>` or `Rc<Object>`, you cannot distinguish between "same object" and "equal objects" because you have no stable object ID.
+
+### Design Simplification: No Free List
+
+**Key Decision**: IDs are **never reused** - always append to vector.
+
+**Alternative Considered**: Free list to recycle IDs (more memory efficient but complex)
+
+**Why Simpler is Better**:
+
+1. **No Use-After-Free Confusion**
+   - With reuse: `id=5` might point to different objects at different times
+   - Without reuse: `id=5` always refers to same object (or None if freed)
+   - Stale references fail clearly instead of silently corrupting data
+
+2. **Easier Debugging**
+   - Monotonic IDs (0, 1, 2, 3...) are easier to trace
+   - Object lifetime tracking is straightforward
+   - No "ID 42 was reused 7 times" confusion
+
+3. **Simpler Implementation**
+   - No free list management logic
+   - No choosing between "reuse slot" vs "allocate new"
+   - `allocate()` is just: push and increment
+
+4. **Natural Safety**
+   - No need for generational indices
+   - Accessing freed ID returns clear error
+   - Thread-safe atomic increment is trivial (future enhancement)
+
+**Trade-offs Accepted**:
+
+- ❌ Vector keeps growing (but freed slots are just `None` = 1 byte)
+- ❌ Can't reclaim vector capacity without compacting
+- ❌ Iteration must skip `None` entries
+
+**For Monty's Use Case**: These trade-offs are acceptable because:
+- Executions are short-lived (heap cleared between runs)
+- Memory overhead is minimal (`None` vs full object)
+- Simplicity enables faster development and fewer bugs
 
 ## Design Overview
 
@@ -71,13 +111,11 @@ pub type ObjectId = usize;
 ```rust
 /// Central heap managing all allocated objects
 pub struct Heap {
-    /// All heap-allocated objects (contiguous storage)
-    objects: Vec<HeapObject>,
+    /// All heap-allocated objects. None = freed slot.
+    /// IDs are never reused - always append new objects.
+    objects: Vec<Option<HeapObject>>,
 
-    /// Free list for recycling slots
-    free_list: Vec<ObjectId>,
-
-    /// Next ID to allocate (if free_list empty)
+    /// Next ID to allocate (monotonically increasing)
     next_id: ObjectId,
 }
 
@@ -103,35 +141,6 @@ pub enum HeapData {
 }
 ```
 
-### Enhanced Version: Generational Indices
-
-For additional safety, detect use-after-free:
-
-```rust
-/// Object ID with generation counter
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub struct ObjectId {
-    index: u32,
-    generation: u32,
-}
-
-/// Heap slot that can be reused
-struct Slot {
-    /// Current object (None if freed)
-    object: Option<HeapObject>,
-
-    /// Incremented each time slot is reused
-    generation: u32,
-}
-
-pub struct Heap {
-    slots: Vec<Slot>,
-    free_list: Vec<u32>, // Just indices
-}
-```
-
-**Benefit**: Accessing a freed object returns an error instead of wrong data or crash.
-
 ## Implementation Plan
 
 ### Phase 1: Core Heap Infrastructure (Foundation)
@@ -150,8 +159,7 @@ pub struct Heap {
 1. **Create `src/heap.rs`**:
 ```rust
 pub struct Heap {
-    objects: Vec<HeapObject>,
-    free_list: Vec<ObjectId>,
+    objects: Vec<Option<HeapObject>>,
     next_id: ObjectId,
 }
 
@@ -159,87 +167,91 @@ impl Heap {
     pub fn new() -> Self {
         Heap {
             objects: Vec::new(),
-            free_list: Vec::new(),
             next_id: 0,
         }
     }
 
     /// Allocate a new heap object, returns its ID
+    /// IDs are never reused - always append
     pub fn allocate(&mut self, data: HeapData) -> ObjectId {
-        if let Some(id) = self.free_list.pop() {
-            // Reuse freed slot
-            self.objects[id] = HeapObject {
-                refcount: 1,
-                data,
-            };
-            id
-        } else {
-            // Allocate new slot
-            let id = self.next_id;
-            self.objects.push(HeapObject {
-                refcount: 1,
-                data,
-            });
-            self.next_id += 1;
-            id
-        }
+        let id = self.next_id;
+        self.objects.push(Some(HeapObject {
+            refcount: 1,
+            data,
+        }));
+        self.next_id += 1;
+        id
     }
 
     /// Increment reference count
     pub fn inc_ref(&mut self, id: ObjectId) {
-        self.objects[id].refcount += 1;
+        if let Some(Some(obj)) = self.objects.get_mut(id) {
+            obj.refcount += 1;
+        }
     }
 
     /// Decrement reference count, free if zero
     pub fn dec_ref(&mut self, id: ObjectId) {
-        let refcount = &mut self.objects[id].refcount;
-        *refcount -= 1;
-
-        if *refcount == 0 {
-            self.free_object(id);
+        if let Some(Some(obj)) = self.objects.get_mut(id) {
+            obj.refcount -= 1;
+            if obj.refcount == 0 {
+                self.free_object(id);
+            }
         }
     }
 
     /// Get immutable reference to object data
-    pub fn get(&self, id: ObjectId) -> &HeapData {
-        &self.objects[id].data
+    pub fn get(&self, id: ObjectId) -> Result<&HeapData, HeapError> {
+        self.objects
+            .get(id)
+            .and_then(|slot| slot.as_ref())
+            .map(|obj| &obj.data)
+            .ok_or(HeapError::InvalidId)
     }
 
     /// Get mutable reference to object data
-    pub fn get_mut(&mut self, id: ObjectId) -> &mut HeapData {
-        &mut self.objects[id].data
+    pub fn get_mut(&mut self, id: ObjectId) -> Result<&mut HeapData, HeapError> {
+        self.objects
+            .get_mut(id)
+            .and_then(|slot| slot.as_mut())
+            .map(|obj| &mut obj.data)
+            .ok_or(HeapError::InvalidId)
     }
 
     fn free_object(&mut self, id: ObjectId) {
         // Recursively dec_ref any contained Objects
         self.dec_ref_contents(id);
 
-        // Add to free list for reuse
-        self.free_list.push(id);
+        // Set slot to None, freeing the HeapObject
+        self.objects[id] = None;
     }
 
     fn dec_ref_contents(&mut self, id: ObjectId) {
         // Need to collect IDs first to avoid borrowing issues
-        let child_ids: Vec<ObjectId> = match &self.objects[id].data {
-            HeapData::List(items) | HeapData::Tuple(items) => {
-                items.iter()
-                    .filter_map(|obj| match obj {
-                        Object::Ref(id) => Some(*id),
-                        _ => None,
-                    })
-                    .collect()
+        let child_ids: Vec<ObjectId> = if let Some(Some(obj)) = &self.objects.get(id) {
+            match &obj.data {
+                HeapData::List(items) | HeapData::Tuple(items) => {
+                    items.iter()
+                        .filter_map(|obj| match obj {
+                            Object::Ref(id) => Some(*id),
+                            _ => None,
+                        })
+                        .collect()
+                }
+                HeapData::Dict(map) => {
+                    map.iter()
+                        .flat_map(|(k, v)| {
+                            let mut ids = Vec::new();
+                            if let Object::Ref(id) = k { ids.push(*id); }
+                            if let Object::Ref(id) = v { ids.push(*id); }
+                            ids
+                        })
+                        .collect()
+                }
+                _ => Vec::new(),
             }
-            HeapData::Dict(map) => {
-                map.iter()
-                    .flat_map(|(k, v)| {
-                        let mut ids = Vec::new();
-                        if let Object::Ref(id) = k { ids.push(*id); }
-                        if let Object::Ref(id) = v { ids.push(*id); }
-                        ids
-                    })
-                    .collect()
-            }
-            _ => Vec::new(),
+        } else {
+            Vec::new()
         };
 
         // Now dec_ref all children
@@ -268,8 +280,11 @@ impl Object {
         match (self, other) {
             (Object::Int(a), Object::Int(b)) => Some(Object::Int(a + b)),
             (Object::Ref(id_a), Object::Ref(id_b)) => {
-                // Get data from heap
-                match (heap.get(*id_a), heap.get(*id_b)) {
+                // Get data from heap (handle Result)
+                let data_a = heap.get(*id_a).ok()?;
+                let data_b = heap.get(*id_b).ok()?;
+
+                match (data_a, data_b) {
                     (HeapData::Str(a), HeapData::Str(b)) => {
                         let result = format!("{}{}", a, b);
                         let id = heap.allocate(HeapData::Str(result));
@@ -754,39 +769,18 @@ impl Heap {
 
         // Sweep phase
         for id in 0..self.objects.len() {
-            if !marked.contains(&id) && self.objects[id].refcount > 0 {
-                // Found unreachable cycle
-                self.free_object(id);
+            if let Some(Some(obj)) = self.objects.get(id) {
+                if !marked.contains(&id) && obj.refcount > 0 {
+                    // Found unreachable cycle
+                    self.free_object(id);
+                }
             }
         }
     }
 }
 ```
 
-### 2. Generational Indices
-
-Add generation counters for safety:
-
-```rust
-pub struct ObjectId {
-    index: u32,
-    generation: u32,
-}
-
-impl Heap {
-    pub fn get(&self, id: ObjectId) -> Result<&HeapData, HeapError> {
-        let slot = &self.slots[id.index as usize];
-        if slot.generation != id.generation {
-            return Err(HeapError::UseAfterFree);
-        }
-        slot.object.as_ref()
-            .ok_or(HeapError::UseAfterFree)
-            .map(|obj| &obj.data)
-    }
-}
-```
-
-### 3. Compacting GC
+### 2. Compacting GC
 
 When heap becomes fragmented, compact:
 
@@ -802,16 +796,17 @@ impl Heap {
 
 ## Conclusion
 
-The generational arena hybrid design provides:
+The arena hybrid design provides:
 
 ✅ **Python-compatible reference semantics**
 ✅ **Object identity** for `is` operator
 ✅ **Efficient** immediate values for common cases
 ✅ **Safe** reference counting with clear ownership
+✅ **Simple** no ID reuse eliminates entire class of bugs
 ✅ **Extensible** foundation for GC, closures, classes
 ✅ **Debuggable** can inspect entire heap state
 
-It requires significant refactoring but enables correct Python behavior and is the foundation for all future features.
+The simplified approach (no free list, monotonic IDs) trades some memory efficiency for significant implementation simplicity and safety. For Monty's use case (sandboxed execution), this is an excellent trade-off.
 
 ## Next Steps
 
