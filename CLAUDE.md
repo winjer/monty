@@ -64,6 +64,9 @@ NOTE: COMMENTS AND DOCSTRINGS ARE EXTREMELY IMPORTANT TO THE LONG TERM HEALTH OF
 
 Tests should always be as concise as possible while covering all possible cases.
 
+Unless the test must check very specific behaviour, all python execution behavior should be only require adding
+test fixtures to `test_cases/`. The file names should take the form `<group_name>__<test_name>.py`.
+
 Review other tests in the same file or elsewhere in `tests/` and follow the same styles.
 
 In particular, use macros as shown in `tests/main.rs` to allow you to create many tests without them becoming

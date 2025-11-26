@@ -90,7 +90,7 @@ fn parse_fixture(content: &str) -> (String, Expectation) {
 /// This function executes Python code via the Executor and validates the result
 /// against the expected outcome specified in the fixture.
 fn run_test(path: &Path, code: &str, expectation: Expectation) {
-    let test_name = path.file_name().unwrap().to_string_lossy();
+    let test_name = path.strip_prefix("test_cases/").unwrap_or(path).display().to_string();
 
     match Executor::new(code, "test.py", &[]) {
         Ok(mut ex) => match ex.run(vec![]) {
@@ -152,41 +152,5 @@ fn run_fixture_test(path: &Path) -> Result<(), Box<dyn Error>> {
 }
 
 // Generate tests for all fixture files using datatest-stable harness macro
-datatest_stable::harness!(
-    run_fixture_test,
-    "test_fixtures/parse_error",
-    r"^.*\.py$",
-    run_fixture_test,
-    "test_fixtures/execute_ok",
-    r"^.*\.py$",
-    run_fixture_test,
-    "test_fixtures/execute_raise",
-    r"^.*\.py$",
-    run_fixture_test,
-    "test_fixtures/id",
-    r"^.*\.py$",
-    run_fixture_test,
-    "test_fixtures/type_error",
-    r"^.*\.py$",
-    run_fixture_test,
-    "test_fixtures/edge",
-    r"^.*\.py$",
-    run_fixture_test,
-    "test_fixtures/str",
-    r"^.*\.py$",
-    run_fixture_test,
-    "test_fixtures/bytes",
-    r"^.*\.py$",
-    run_fixture_test,
-    "test_fixtures/list",
-    r"^.*\.py$",
-    run_fixture_test,
-    "test_fixtures/tuple",
-    r"^.*\.py$",
-    run_fixture_test,
-    "test_fixtures/int",
-    r"^.*\.py$",
-    run_fixture_test,
-    "test_fixtures/is_variant",
-    r"^.*\.py$"
-);
+// All fixtures are now in a flat structure with group prefixes (e.g., id__is_test.py)
+datatest_stable::harness!(run_fixture_test, "test_cases", r"^.*\.py$");
