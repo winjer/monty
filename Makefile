@@ -24,6 +24,7 @@ lint-rs:  ## Lint Rust code with fmt and clippy
 lint-py: ## Lint Python code with ruff
 	uv run ruff format
 	uv run ruff check --fix --fix-only
+	uv run basedpyright
 
 .PHONY: lint
 lint: lint-rs lint-py ## Lint the code with ruff and clippy
@@ -47,6 +48,7 @@ bench: ## Run benchmarks
 .PHONY: profile
 profile: ## Profile the code with pprof and generate flamegraphs
 	cargo bench --bench main --profile profiling -- --profile-time=5
+	uv run scripts/flamegraph_to_text.py
 
 .PHONY: all
 all: lint test
