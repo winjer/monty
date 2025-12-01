@@ -1,4 +1,4 @@
-use std::fmt;
+use std::fmt::{self, Write};
 
 use strum::Display;
 
@@ -60,16 +60,16 @@ pub(crate) enum CmpOperator {
 impl fmt::Display for CmpOperator {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Eq => write!(f, "=="),
-            Self::NotEq => write!(f, "!="),
-            Self::Lt => write!(f, "<"),
-            Self::LtE => write!(f, "<="),
-            Self::Gt => write!(f, ">"),
-            Self::GtE => write!(f, ">="),
-            Self::Is => write!(f, "is"),
-            Self::IsNot => write!(f, "is not"),
-            Self::In => write!(f, "in"),
-            Self::NotIn => write!(f, "not in"),
+            Self::Eq => f.write_str("=="),
+            Self::NotEq => f.write_str("!="),
+            Self::Lt => f.write_char('<'),
+            Self::LtE => f.write_str("<="),
+            Self::Gt => f.write_char('>'),
+            Self::GtE => f.write_str(">="),
+            Self::Is => f.write_str("is"),
+            Self::IsNot => f.write_str("is not"),
+            Self::In => f.write_str("in"),
+            Self::NotIn => f.write_str("not in"),
             Self::ModEq(v) => write!(f, "% X == {v}"),
         }
     }

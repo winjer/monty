@@ -524,7 +524,7 @@ impl<'c> CodeRange<'c> {
 
         if let Some(line) = &self.preview_line {
             writeln!(f, "    {line}")?;
-            write!(f, "{}", " ".repeat(4 - 1 + self.start.column as usize))?;
+            f.write_str(&" ".repeat(4 - 1 + self.start.column as usize))?;
             writeln!(f, "{}", "~".repeat((self.end.column - self.start.column) as usize))
         } else {
             Ok(())

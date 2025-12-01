@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 use std::collections::hash_map::DefaultHasher;
-use std::fmt;
+use std::fmt::{self, Write};
 use std::hash::{Hash, Hasher};
 
 use strum::{Display, EnumString, IntoStaticStr};
@@ -171,10 +171,10 @@ impl fmt::Display for SimpleException {
         write!(f, "{type_str}(")?;
 
         if let Some(arg) = &self.arg {
-            write!(f, "{}", string_repr(arg))?;
+            f.write_str(&string_repr(arg))?;
         }
 
-        write!(f, ")")
+        f.write_char(')')
     }
 }
 
@@ -377,7 +377,7 @@ impl fmt::Display for InternalRunError {
             Self::TodoError(s) => write!(f, "Internal Error TODO: {s}"),
             Self::Undefined(s) => {
                 if s.is_empty() {
-                    write!(f, "Internal Error: accessing undefined object")
+                    f.write_str("Internal Error: accessing undefined object")
                 } else {
                     write!(f, "Internal Error: accessing undefined object `{s}`")
                 }

@@ -47,7 +47,7 @@ pub struct Value<'e> {
 
 impl fmt::Display for Value<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.py_str())
+        f.write_str(&self.py_str())
     }
 }
 

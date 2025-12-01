@@ -1,4 +1,4 @@
-use std::fmt;
+use std::fmt::{self, Write};
 use std::str::FromStr;
 
 use crate::args::ArgExprs;
@@ -40,7 +40,7 @@ impl fmt::Display for Callable<'_> {
         match self {
             Self::Builtin(b) => write!(f, "{b}"),
             Self::Exception(exc) => write!(f, "{exc}"),
-            Self::Ident(i) => write!(f, "{}", i.name),
+            Self::Ident(i) => f.write_str(&i.name),
         }
     }
 }
@@ -107,7 +107,7 @@ impl fmt::Display for Expr<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Constant(object) => write!(f, "{object}"),
-            Self::Name(identifier) => write!(f, "{}", identifier.name),
+            Self::Name(identifier) => f.write_str(&identifier.name),
             Self::Call { callable, args } => write!(f, "{callable}{args}"),
             Self::AttrCall { object, attr, args } => write!(f, "{}.{}{}", object.name, attr, args),
             Self::Op { left, op, right } => write!(f, "{left} {op} {right}"),
@@ -129,17 +129,17 @@ impl fmt::Display for Expr<'_> {
             Self::Subscript { object, index } => write!(f, "{object}[{index}]"),
             Self::Dict(pairs) => {
                 if pairs.is_empty() {
-                    write!(f, "{{}}")
+                    f.write_str("{}")
                 } else {
-                    write!(
-                        f,
-                        "{{{}}}",
-                        pairs
-                            .iter()
-                            .map(|(k, v)| format!("{k}: {v}"))
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    )
+                    f.write_char('{')?;
+                    let mut iter = pairs.iter();
+                    if let Some((k, v)) = iter.next() {
+                        write!(f, "{k}: {v}")?;
+                    }
+                    for (k, v) in iter {
+                        write!(f, ", {k}: {v}")?;
+                    }
+                    f.write_char('}')
                 }
             }
         }
@@ -193,14 +193,14 @@ impl Const {
 impl fmt::Display for Const {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Ellipsis => write!(f, "..."),
-            Self::None => write!(f, "None"),
-            Self::Bool(true) => write!(f, "True"),
-            Self::Bool(false) => write!(f, "False"),
+            Self::Ellipsis => f.write_str("..."),
+            Self::None => f.write_str("None"),
+            Self::Bool(true) => f.write_str("True"),
+            Self::Bool(false) => f.write_str("False"),
             Self::Int(v) => write!(f, "{v}"),
             Self::Float(v) => write!(f, "{v}"),
-            Self::Str(v) => write!(f, "{}", string_repr(v)),
-            Self::Bytes(v) => write!(f, "{}", bytes_repr(v)),
+            Self::Str(v) => f.write_str(&string_repr(v)),
+            Self::Bytes(v) => f.write_str(&bytes_repr(v)),
         }
     }
 }

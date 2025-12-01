@@ -1,4 +1,4 @@
-use std::fmt;
+use std::fmt::{self, Write};
 
 use crate::{
     exceptions::ExcType,
@@ -161,7 +161,7 @@ impl<'c> ArgExprs<'c> {
 
 impl fmt::Display for ArgExprs<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "(")?;
+        f.write_char('(')?;
         match self {
             Self::Zero => {}
             Self::One(arg) => write!(f, "{arg}")?,
@@ -197,6 +197,6 @@ impl fmt::Display for ArgExprs<'_> {
                 }
             }
         }
-        write!(f, ")")
+        f.write_char(')')
     }
 }
