@@ -6,6 +6,7 @@ use crate::exceptions::{
 use crate::expressions::{ExprLoc, Identifier, NameScope, Node};
 use crate::heap::{Heap, HeapData};
 use crate::intern::{FunctionId, Interns, StringId, MODULE_STRING_ID};
+use crate::io::PrintWriter;
 use crate::namespace::{NamespaceId, Namespaces, GLOBAL_NS_IDX};
 use crate::operators::Operator;
 use crate::parse::CodeRange;
@@ -33,7 +34,7 @@ pub type RunResult<T> = Result<T, RunError>;
 /// When accessing a variable with `NameScope::Cell`, we look up the namespace
 /// slot to get the `Value::Ref(cell_id)`, then read/write through that cell.
 #[derive(Debug)]
-pub struct RunFrame<'i, P: AbstractPositionTracker> {
+pub struct RunFrame<'i, P: AbstractPositionTracker, W: PrintWriter> {
     /// Index of this frame's local namespace in Namespaces.
     local_idx: NamespaceId,
     /// Parent stack frame for error reporting.
@@ -45,6 +46,8 @@ pub struct RunFrame<'i, P: AbstractPositionTracker> {
     interns: &'i Interns,
     /// reference to position tracker
     position_tracker: &'i mut P,
+    /// Writer for print output
+    writer: &'i mut W,
 }
 
 /// Extracts a value from `EvalResult`, returning early with `FrameExit::ExternalCall` if
@@ -61,17 +64,18 @@ macro_rules! frame_ext_call {
     };
 }
 
-impl<'i, P: AbstractPositionTracker> RunFrame<'i, P> {
+impl<'i, P: AbstractPositionTracker, W: PrintWriter> RunFrame<'i, P, W> {
     /// Creates a new frame for module-level execution.
     ///
     /// At module level, `local_idx` is `GLOBAL_NS_IDX` (0).
-    pub fn module_frame(interns: &'i Interns, position_tracker: &'i mut P) -> Self {
+    pub fn module_frame(interns: &'i Interns, position_tracker: &'i mut P, writer: &'i mut W) -> Self {
         Self {
             local_idx: GLOBAL_NS_IDX,
             parent: None,
             name: MODULE_STRING_ID,
             interns,
             position_tracker,
+            writer,
         }
     }
 
@@ -88,12 +92,14 @@ impl<'i, P: AbstractPositionTracker> RunFrame<'i, P> {
     /// * `name` - The function name StringId (for error messages)
     /// * `parent` - Parent stack frame for error traceback
     /// * `position_tracker` - Tracker for the current position in the code
+    /// * `writer` - Writer for print output
     pub fn function_frame(
         local_idx: NamespaceId,
         name: StringId,
         parent: Option<StackFrame>,
         interns: &'i Interns,
         position_tracker: &'i mut P,
+        writer: &'i mut W,
     ) -> Self {
         Self {
             local_idx,
@@ -101,6 +107,7 @@ impl<'i, P: AbstractPositionTracker> RunFrame<'i, P> {
             name,
             interns,
             position_tracker,
+            writer,
         }
     }
 
@@ -112,10 +119,10 @@ impl<'i, P: AbstractPositionTracker> RunFrame<'i, P> {
     /// * `namespaces` - The namespace stack
     /// * `heap` - The heap for allocations
     /// * `nodes` - The AST nodes to execute
-    pub fn execute<T: ResourceTracker>(
+    pub fn execute(
         &mut self,
         namespaces: &mut Namespaces,
-        heap: &mut Heap<T>,
+        heap: &mut Heap<impl ResourceTracker>,
         nodes: &[Node],
     ) -> RunResult<Option<FrameExit>> {
         // The first position must be an Index - it tells us where to start in this block
@@ -148,10 +155,10 @@ impl<'i, P: AbstractPositionTracker> RunFrame<'i, P> {
     /// Returns `Some(exit)` if the node caused a yield/return, where:
     /// - `exit` is the FrameExit (Yield or Return)
     /// - `positions` is the position stack within this node (empty for simple yields/returns)
-    fn execute_node<T: ResourceTracker>(
+    fn execute_node(
         &mut self,
         namespaces: &mut Namespaces,
-        heap: &mut Heap<T>,
+        heap: &mut Heap<impl ResourceTracker>,
         node: &Node,
         clause_state: Option<ClauseState>,
     ) -> RunResult<Option<FrameExit>> {
@@ -171,7 +178,9 @@ impl<'i, P: AbstractPositionTracker> RunFrame<'i, P> {
 
         match node {
             Node::Expr(expr) => {
-                match EvaluateExpr::new(namespaces, self.local_idx, heap, self.interns).evaluate_discard(expr) {
+                match EvaluateExpr::new(namespaces, self.local_idx, heap, self.interns, self.writer)
+                    .evaluate_discard(expr)
+                {
                     Ok(EvalResult::Value(())) => {}
                     Ok(EvalResult::ExternalCall(ext_call)) => return Ok(Some(FrameExit::ExternalCall(ext_call))),
                     Err(mut e) => {
@@ -241,13 +250,13 @@ impl<'i, P: AbstractPositionTracker> RunFrame<'i, P> {
     }
 
     /// Evaluates an expression and returns a Value.
-    fn execute_expr<T: ResourceTracker>(
-        &self,
+    fn execute_expr(
+        &mut self,
         namespaces: &mut Namespaces,
-        heap: &mut Heap<T>,
+        heap: &mut Heap<impl ResourceTracker>,
         expr: &ExprLoc,
     ) -> RunResult<EvalResult<Value>> {
-        match EvaluateExpr::new(namespaces, self.local_idx, heap, self.interns).evaluate_use(expr) {
+        match EvaluateExpr::new(namespaces, self.local_idx, heap, self.interns, self.writer).evaluate_use(expr) {
             Ok(value) => Ok(value),
             Err(mut e) => {
                 set_name(self.name, &mut e);
@@ -256,13 +265,13 @@ impl<'i, P: AbstractPositionTracker> RunFrame<'i, P> {
         }
     }
 
-    fn execute_expr_bool<T: ResourceTracker>(
-        &self,
+    fn execute_expr_bool(
+        &mut self,
         namespaces: &mut Namespaces,
-        heap: &mut Heap<T>,
+        heap: &mut Heap<impl ResourceTracker>,
         expr: &ExprLoc,
     ) -> RunResult<EvalResult<bool>> {
-        match EvaluateExpr::new(namespaces, self.local_idx, heap, self.interns).evaluate_bool(expr) {
+        match EvaluateExpr::new(namespaces, self.local_idx, heap, self.interns, self.writer).evaluate_bool(expr) {
             Ok(value) => Ok(value),
             Err(mut e) => {
                 set_name(self.name, &mut e);
@@ -277,10 +286,10 @@ impl<'i, P: AbstractPositionTracker> RunFrame<'i, P> {
     /// * Exception instance (Value::Exc) - raise directly
     /// * Exception type (Value::Callable with ExcType) - instantiate then raise
     /// * Anything else - TypeError
-    fn raise<T: ResourceTracker>(
+    fn raise(
         &mut self,
         namespaces: &mut Namespaces,
-        heap: &mut Heap<T>,
+        heap: &mut Heap<impl ResourceTracker>,
         op_exc_expr: Option<&ExprLoc>,
     ) -> RunResult<Option<FrameExit>> {
         if let Some(exc_expr) = op_exc_expr {
@@ -294,7 +303,7 @@ impl<'i, P: AbstractPositionTracker> RunFrame<'i, P> {
                 Value::Builtin(builtin) => {
                     // Callable is inline - call it to get the exception
                     let builtin = *builtin;
-                    let result = builtin.call(heap, ArgValues::Zero, self.interns)?;
+                    let result = builtin.call(heap, ArgValues::Zero, self.interns, self.writer)?;
                     if matches!(&result, Value::Exc(_)) {
                         // No need to drop value - Callable is Copy and doesn't need cleanup
                         let exc = result.into_exc();
@@ -314,10 +323,10 @@ impl<'i, P: AbstractPositionTracker> RunFrame<'i, P> {
     /// `AssertionError` if the test is falsy.
     ///
     /// If a message expression is provided, it is evaluated and used as the exception message.
-    fn assert_<T: ResourceTracker>(
+    fn assert_(
         &mut self,
         namespaces: &mut Namespaces,
-        heap: &mut Heap<T>,
+        heap: &mut Heap<impl ResourceTracker>,
         test: &ExprLoc,
         msg: Option<&ExprLoc>,
     ) -> RunResult<Option<FrameExit>> {
@@ -336,10 +345,10 @@ impl<'i, P: AbstractPositionTracker> RunFrame<'i, P> {
         Ok(None)
     }
 
-    fn assign<T: ResourceTracker>(
+    fn assign(
         &mut self,
         namespaces: &mut Namespaces,
-        heap: &mut Heap<T>,
+        heap: &mut Heap<impl ResourceTracker>,
         target: &Identifier,
         expr: &ExprLoc,
     ) -> RunResult<Option<FrameExit>> {
@@ -367,10 +376,10 @@ impl<'i, P: AbstractPositionTracker> RunFrame<'i, P> {
         Ok(None)
     }
 
-    fn op_assign<T: ResourceTracker>(
+    fn op_assign(
         &mut self,
         namespaces: &mut Namespaces,
-        heap: &mut Heap<T>,
+        heap: &mut Heap<impl ResourceTracker>,
         target: &Identifier,
         op: &Operator,
         expr: &ExprLoc,
@@ -541,10 +550,10 @@ impl<'i, P: AbstractPositionTracker> RunFrame<'i, P> {
         }
     }
 
-    fn subscript_assign<T: ResourceTracker>(
-        &self,
+    fn subscript_assign(
+        &mut self,
         namespaces: &mut Namespaces,
-        heap: &mut Heap<T>,
+        heap: &mut Heap<impl ResourceTracker>,
         target: &Identifier,
         index: &ExprLoc,
         value: &ExprLoc,
@@ -574,10 +583,10 @@ impl<'i, P: AbstractPositionTracker> RunFrame<'i, P> {
     /// continue after the entire for loop rather than from within the loop body.
     /// Supporting this requires tracking the loop iteration index in the position stack.
     #[allow(clippy::too_many_arguments)]
-    fn for_<T: ResourceTracker>(
+    fn for_(
         &mut self,
         namespaces: &mut Namespaces,
-        heap: &mut Heap<T>,
+        heap: &mut Heap<impl ResourceTracker>,
         target: &Identifier,
         iter: &ExprLoc,
         body: &[Node],
@@ -605,10 +614,10 @@ impl<'i, P: AbstractPositionTracker> RunFrame<'i, P> {
     /// Executes an if statement.
     ///
     /// Evaluates the test condition and executes the appropriate branch.
-    fn if_<T: ResourceTracker>(
+    fn if_(
         &mut self,
         namespaces: &mut Namespaces,
-        heap: &mut Heap<T>,
+        heap: &mut Heap<impl ResourceTracker>,
         test: &ExprLoc,
         body: &[Node],
         or_else: &[Node],
@@ -636,10 +645,10 @@ impl<'i, P: AbstractPositionTracker> RunFrame<'i, P> {
     /// Closures share cells with their enclosing scope. The cell HeapIds are
     /// looked up from the enclosing namespace slots specified in free_var_enclosing_slots.
     /// This ensures modifications through `nonlocal` are visible to both scopes.
-    fn define_function<T: ResourceTracker>(
+    fn define_function(
         &self,
         namespaces: &mut Namespaces,
-        heap: &mut Heap<T>,
+        heap: &mut Heap<impl ResourceTracker>,
         function_id: FunctionId,
     ) -> RunResult<()> {
         let function = self.interns.get_function(function_id);

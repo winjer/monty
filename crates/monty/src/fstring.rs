@@ -12,6 +12,7 @@ use crate::expressions::ExprLoc;
 
 use crate::heap::{Heap, HeapData};
 use crate::intern::Interns;
+use crate::io::PrintWriter;
 use crate::resource::ResourceTracker;
 use crate::run_frame::RunResult;
 use crate::types::PyTrait;
@@ -229,7 +230,7 @@ enum ValueType {
 }
 
 impl ValueType {
-    fn from_value<T: ResourceTracker>(value: &Value, heap: &Heap<T>) -> Self {
+    fn from_value(value: &Value, heap: &Heap<impl ResourceTracker>) -> Self {
         match value {
             Value::Int(_) => ValueType::Int,
             Value::Float(_) => ValueType::Float,
@@ -270,8 +271,8 @@ impl ValueType {
 /// # Returns
 /// `Ok(())` on success, or an error if formatting fails.
 /// The caller is responsible for dropping `value` after this function returns.
-pub(crate) fn fstring_interpolation<T: ResourceTracker>(
-    evaluator: &mut EvaluateExpr<'_, '_, T>,
+pub(crate) fn fstring_interpolation(
+    evaluator: &mut EvaluateExpr<'_, '_, impl ResourceTracker, impl PrintWriter>,
     result: &mut String,
     value: &Value,
     conversion: ConversionFlag,
@@ -320,10 +321,10 @@ pub(crate) fn fstring_interpolation<T: ResourceTracker>(
 /// - Str (`!s`): Explicitly uses `py_str()`
 /// - Repr (`!r`): Uses `py_repr()` for debugging representation
 /// - Ascii (`!a`): Uses `py_repr()` and escapes non-ASCII characters
-fn apply_conversion<T: ResourceTracker>(
+fn apply_conversion(
     value: &Value,
     conversion: ConversionFlag,
-    heap: &Heap<T>,
+    heap: &Heap<impl ResourceTracker>,
     interns: &Interns,
 ) -> String {
     match conversion {
@@ -341,8 +342,8 @@ fn apply_conversion<T: ResourceTracker>(
 ///
 /// Evaluates each part and concatenates the results into a format spec string,
 /// which is then parsed into a `ParsedFormatSpec` at runtime.
-fn evaluate_dynamic_format_spec<T: ResourceTracker>(
-    evaluator: &mut EvaluateExpr<'_, '_, T>,
+fn evaluate_dynamic_format_spec(
+    evaluator: &mut EvaluateExpr<'_, '_, impl ResourceTracker, impl PrintWriter>,
     parts: &[FStringPart],
 ) -> RunResult<EvalResult<String>> {
     let mut result = String::new();

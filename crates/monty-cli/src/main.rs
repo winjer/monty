@@ -3,8 +3,7 @@ use std::fs;
 use std::process::ExitCode;
 use std::time::Instant;
 
-use monty::ExecProgress;
-use monty::ExecutorIter;
+use monty::{ExecProgress, ExecutorIter, StdPrint};
 
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().collect();
@@ -29,7 +28,7 @@ fn main() -> ExitCode {
     };
 
     let start = Instant::now();
-    match ex.run_no_limits(inputs) {
+    match ex.run_no_limits(inputs, &mut StdPrint) {
         Ok(ExecProgress::Complete(value)) => {
             let elapsed = start.elapsed();
             eprintln!("{elapsed:?}, output: {value}");

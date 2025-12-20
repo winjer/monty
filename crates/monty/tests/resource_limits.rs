@@ -4,7 +4,7 @@
 /// allocation limits, time limits, and triggers garbage collection.
 use std::time::Duration;
 
-use monty::{Executor, ExecutorIter, PyObject, ResourceLimits, RunError};
+use monty::{Executor, ExecutorIter, PyObject, ResourceLimits, RunError, StdPrint};
 
 /// Test that allocation limits return an error.
 #[test]
@@ -192,7 +192,7 @@ fn executor_iter_resource_limit_on_resume() {
     // First function call should succeed with generous limit
     let limits = ResourceLimits::new().max_allocations(5);
     let (name, args, state) = exec
-        .run_with_limits(vec![], limits)
+        .run_with_limits(vec![], limits, &mut StdPrint)
         .unwrap()
         .into_function_call()
         .expect("function call");
@@ -200,7 +200,7 @@ fn executor_iter_resource_limit_on_resume() {
     assert_eq!(args, vec![PyObject::Int(1)]);
 
     // Resume - should fail due to allocation limit during the for loop
-    let result = state.run(PyObject::None);
+    let result = state.run(PyObject::None, &mut StdPrint);
     assert!(result.is_err(), "should exceed allocation limit on resume");
     match result.unwrap_err() {
         RunError::Resource(err) => {
@@ -226,7 +226,7 @@ fn executor_iter_resource_limit_before_function_call() {
 
     // Should fail before reaching the function call
     let limits = ResourceLimits::new().max_allocations(3);
-    let result = exec.run_with_limits(vec![], limits);
+    let result = exec.run_with_limits(vec![], limits, &mut StdPrint);
 
     assert!(result.is_err(), "should exceed allocation limit before function call");
     match result.unwrap_err() {
@@ -257,7 +257,7 @@ fn executor_iter_resource_limit_multiple_function_calls() {
     let limits = ResourceLimits::new().max_allocations(100);
 
     let (name, args, state) = exec
-        .run_with_limits(vec![], limits)
+        .run_with_limits(vec![], limits, &mut StdPrint)
         .unwrap()
         .into_function_call()
         .expect("first call");
@@ -265,7 +265,7 @@ fn executor_iter_resource_limit_multiple_function_calls() {
     assert_eq!(args, vec![PyObject::Int(1)]);
 
     let (name, args, state) = state
-        .run(PyObject::None)
+        .run(PyObject::None, &mut StdPrint)
         .unwrap()
         .into_function_call()
         .expect("second call");
@@ -273,13 +273,17 @@ fn executor_iter_resource_limit_multiple_function_calls() {
     assert_eq!(args, vec![PyObject::Int(2)]);
 
     let (name, args, state) = state
-        .run(PyObject::None)
+        .run(PyObject::None, &mut StdPrint)
         .unwrap()
         .into_function_call()
         .expect("third call");
     assert_eq!(name, "baz");
     assert_eq!(args, vec![PyObject::Int(3)]);
 
-    let result = state.run(PyObject::None).unwrap().into_complete().expect("complete");
+    let result = state
+        .run(PyObject::None, &mut StdPrint)
+        .unwrap()
+        .into_complete()
+        .expect("complete");
     assert_eq!(result, PyObject::Int(4));
 }

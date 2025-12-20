@@ -46,9 +46,9 @@ impl ExcType {
     /// Currently supports zero or one string argument.
     ///
     /// The `interns` parameter provides access to interned string content.
-    pub(crate) fn call<T: ResourceTracker>(
+    pub(crate) fn call(
         self,
-        heap: &mut Heap<T>,
+        heap: &mut Heap<impl ResourceTracker>,
         args: ArgValues,
         interns: &Interns,
     ) -> RunResult<Value> {
@@ -115,7 +115,7 @@ impl ExcType {
     /// For string keys, uses the raw string value without extra quoting.
     /// For other types, uses repr.
     #[must_use]
-    pub fn key_error<T: ResourceTracker>(key: &Value, heap: &Heap<T>, interns: &Interns) -> RunError {
+    pub fn key_error(key: &Value, heap: &Heap<impl ResourceTracker>, interns: &Interns) -> RunError {
         let key_str = match key {
             Value::InternString(string_id) => interns.get_str(*string_id).to_owned(),
             Value::Ref(id) => {

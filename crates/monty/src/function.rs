@@ -6,6 +6,7 @@ use crate::{
     expressions::{Identifier, Node},
     heap::{Heap, HeapId},
     intern::{Interns, StringId},
+    io::PrintWriter,
     namespace::{NamespaceId, Namespaces},
     position::{FrameExit, NoPositionTracker},
     resource::ResourceTracker,
@@ -110,12 +111,14 @@ impl Function {
     /// * `heap` - The heap for allocating objects
     /// * `args` - The arguments to pass to the function
     /// * `interns` - String storage for looking up interned names in error messages
-    pub fn call<T: ResourceTracker>(
+    /// * `writer` - The writer for print output
+    pub fn call(
         &self,
         namespaces: &mut Namespaces,
-        heap: &mut Heap<T>,
+        heap: &mut Heap<impl ResourceTracker>,
         args: ArgValues,
         interns: &Interns,
+        writer: &mut impl PrintWriter,
     ) -> RunResult<Value> {
         // Build namespace sequentially: [params][cell_vars][free_vars][locals]
         let mut namespace = Vec::with_capacity(self.namespace_size);
@@ -146,7 +149,14 @@ impl Function {
 
         // Execute the function body in a new frame
         let mut p = NoPositionTracker;
-        let mut frame = RunFrame::function_frame(local_idx, self.name.name_id, Some(parent_frame), interns, &mut p);
+        let mut frame = RunFrame::function_frame(
+            local_idx,
+            self.name.name_id,
+            Some(parent_frame),
+            interns,
+            &mut p,
+            writer,
+        );
 
         let result = frame.execute(namespaces, heap, &self.body);
 
@@ -164,16 +174,18 @@ impl Function {
     /// * `args` - The arguments to pass to the function
     /// * `captured_cells` - Cell HeapIds captured from the enclosing scope
     /// * `interns` - String storage for looking up interned names in error messages
+    /// * `writer` - The writer for print output
     ///
     /// This method is called when invoking a `Value::Closure`. The captured_cells
     /// are pushed sequentially after cell_vars in the namespace.
-    pub fn call_with_cells<T: ResourceTracker>(
+    pub fn call_with_cells(
         &self,
         namespaces: &mut Namespaces,
-        heap: &mut Heap<T>,
+        heap: &mut Heap<impl ResourceTracker>,
         args: ArgValues,
         captured_cells: &[HeapId],
         interns: &Interns,
+        writer: &mut impl PrintWriter,
     ) -> RunResult<Value> {
         // Build namespace sequentially: [params][cell_vars][free_vars][locals]
         let mut namespace = Vec::with_capacity(self.namespace_size);
@@ -209,7 +221,14 @@ impl Function {
 
         // Execute the function body in a new frame
         let mut p = NoPositionTracker;
-        let mut frame = RunFrame::function_frame(local_idx, self.name.name_id, Some(parent_frame), interns, &mut p);
+        let mut frame = RunFrame::function_frame(
+            local_idx,
+            self.name.name_id,
+            Some(parent_frame),
+            interns,
+            &mut p,
+            writer,
+        );
 
         let result = frame.execute(namespaces, heap, &self.body);
 

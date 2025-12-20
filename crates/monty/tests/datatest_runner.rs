@@ -1,5 +1,5 @@
 use ahash::AHashMap;
-use monty::{ExecProgress, Executor, ExecutorIter, ParseError, PyObject, RunError};
+use monty::{ExecProgress, Executor, ExecutorIter, ParseError, PyObject, RunError, StdPrint};
 use pyo3::prelude::*;
 use std::error::Error;
 use std::fs;
@@ -396,7 +396,7 @@ fn run_iter_test(path: &Path, code: &str, expectation: Expectation) {
 
 /// Execute the iter loop, dispatching external function calls until complete.
 fn run_iter_loop(exec: ExecutorIter) -> Result<PyObject, RunError> {
-    let mut progress = exec.run_no_limits(vec![])?;
+    let mut progress = exec.run_no_limits(vec![], &mut StdPrint)?;
 
     loop {
         match progress {
@@ -407,7 +407,7 @@ fn run_iter_loop(exec: ExecutorIter) -> Result<PyObject, RunError> {
                 state,
             } => {
                 let return_value = dispatch_external_call(&function_name, args);
-                progress = state.run(return_value)?;
+                progress = state.run(return_value, &mut StdPrint)?;
             }
         }
     }

@@ -6,6 +6,7 @@ use crate::{
     expressions::Identifier,
     heap::{Heap, HeapData},
     intern::Interns,
+    io::PrintWriter,
     namespace::{NamespaceId, Namespaces},
     resource::ResourceTracker,
     run_frame::RunResult,
@@ -37,26 +38,28 @@ impl Callable {
     /// * `heap` - The heap for allocating objects
     /// * `args` - The arguments to pass to the callable
     /// * `interns` - String storage for looking up interned names in error messages
-    pub fn call<T: ResourceTracker>(
+    /// * `writer` - The writer for print output
+    pub fn call(
         &self,
         namespaces: &mut Namespaces,
         local_idx: NamespaceId,
-        heap: &mut Heap<T>,
+        heap: &mut Heap<impl ResourceTracker>,
         args: ArgValues,
         interns: &Interns,
+        writer: &mut impl PrintWriter,
     ) -> RunResult<EvalResult<Value>> {
         match self {
-            Callable::Builtin(b) => b.call(heap, args, interns).map(EvalResult::Value),
+            Callable::Builtin(b) => b.call(heap, args, interns, writer).map(EvalResult::Value),
             Callable::Name(ident) => {
                 // Look up the callable in the namespace
                 let value = namespaces.get_var(local_idx, ident, interns)?;
 
                 match value {
-                    Value::Builtin(builtin) => return builtin.call(heap, args, interns).map(EvalResult::Value),
+                    Value::Builtin(builtin) => return builtin.call(heap, args, interns, writer).map(EvalResult::Value),
                     Value::Function(f_id) => {
                         return interns
                             .get_function(*f_id)
-                            .call(namespaces, heap, args, interns)
+                            .call(namespaces, heap, args, interns, writer)
                             .map(EvalResult::Value)
                     }
                     Value::ExtFunction(f_id) => {
@@ -76,7 +79,7 @@ impl Callable {
                             // call_with_cells will inc_ref when injecting into the new namespace
                             let cells = cells.clone();
                             return f
-                                .call_with_cells(namespaces, heap, args, &cells, interns)
+                                .call_with_cells(namespaces, heap, args, &cells, interns, writer)
                                 .map(EvalResult::Value);
                         }
                     }

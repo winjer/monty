@@ -110,7 +110,7 @@ impl Namespaces {
     ///
     /// Returns `Some(Value)` if `next_return_value` points to a value, `None` otherwise.
     /// Used when resuming after an external function call to return the value.
-    pub fn take_return_value<T: ResourceTracker>(&mut self, heap: &mut Heap<T>) -> Option<Value> {
+    pub fn take_return_value(&mut self, heap: &mut Heap<impl ResourceTracker>) -> Option<Value> {
         if let Some(value) = self.return_values.get(self.next_return_value) {
             self.next_return_value += 1;
             Some(value.clone_with_heap(heap))
@@ -123,7 +123,7 @@ impl Namespaces {
     ///
     /// This should be used between expressions to return values are only used in the current expression.
     #[cfg(not(feature = "dec-ref-check"))]
-    pub fn clear_return_values<T: ResourceTracker>(&mut self, _heap: &mut Heap<T>) {
+    pub fn clear_return_values(&mut self, _heap: &mut Heap<impl ResourceTracker>) {
         self.return_values.clear();
         self.next_return_value = 0;
     }
@@ -131,7 +131,7 @@ impl Namespaces {
     /// if `dec-ref-check` is enabled, drop reach member of self.return_values properly before clearing to avoid panic
     /// on drop.
     #[cfg(feature = "dec-ref-check")]
-    pub fn clear_return_values<T: ResourceTracker>(&mut self, heap: &mut Heap<T>) {
+    pub fn clear_return_values(&mut self, heap: &mut Heap<impl ResourceTracker>) {
         for value in &mut self.return_values {
             let v = std::mem::replace(value, Value::Dereferenced);
             v.drop_with_heap(heap);
@@ -177,7 +177,7 @@ impl Namespaces {
     ///
     /// # Panics
     /// Panics if attempting to pop the global namespace (index 0).
-    pub fn pop_with_heap<T: ResourceTracker>(&mut self, heap: &mut Heap<T>) {
+    pub fn pop_with_heap(&mut self, heap: &mut Heap<impl ResourceTracker>) {
         debug_assert!(self.stack.len() > 1, "cannot pop global namespace");
         if let Some(namespace) = self.stack.pop() {
             for value in namespace.0 {
@@ -193,7 +193,7 @@ impl Namespaces {
     ///
     /// Only needed when `dec-ref-check` is enabled, since the Drop impl panics on unfreed Refs.
     #[cfg(feature = "dec-ref-check")]
-    pub fn drop_global_with_heap<T: ResourceTracker>(&mut self, heap: &mut Heap<T>) {
+    pub fn drop_global_with_heap(&mut self, heap: &mut Heap<impl ResourceTracker>) {
         // Clean up global namespace
         let global = self.get_mut(GLOBAL_NS_IDX);
         for value in &mut global.0 {
@@ -291,10 +291,10 @@ impl Namespaces {
     ///
     /// # Returns
     /// A cloned copy of the value (with refcount incremented for Ref values), or NameError if undefined.
-    pub fn get_var_value<T: ResourceTracker>(
+    pub fn get_var_value(
         &self,
         local_idx: NamespaceId,
-        heap: &mut Heap<T>,
+        heap: &mut Heap<impl ResourceTracker>,
         ident: &Identifier,
         interns: &Interns,
     ) -> RunResult<Value> {

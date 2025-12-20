@@ -124,7 +124,7 @@ impl PyObject {
     /// then properly drops the Value via `drop_with_heap` to maintain reference counting.
     ///
     /// The `interns` parameter is used to look up interned string/bytes content.
-    pub(crate) fn new<T: ResourceTracker>(value: Value, heap: &mut Heap<T>, interns: &Interns) -> Self {
+    pub(crate) fn new(value: Value, heap: &mut Heap<impl ResourceTracker>, interns: &Interns) -> Self {
         let py_obj = Self::from_value(&value, heap, interns);
         value.drop_with_heap(heap);
         py_obj
@@ -139,9 +139,9 @@ impl PyObject {
     /// # Errors
     /// Returns `InvalidInputError` if called on the `Repr` variant,
     /// as it is only valid as an output from code execution, not as an input.
-    pub(crate) fn to_value<T: ResourceTracker>(
+    pub(crate) fn to_value(
         self,
-        heap: &mut Heap<T>,
+        heap: &mut Heap<impl ResourceTracker>,
         interns: &Interns,
     ) -> Result<Value, InvalidInputError> {
         match self {
@@ -185,7 +185,7 @@ impl PyObject {
         }
     }
 
-    fn from_value<T: ResourceTracker>(object: &Value, heap: &Heap<T>, interns: &Interns) -> Self {
+    fn from_value(object: &Value, heap: &Heap<impl ResourceTracker>, interns: &Interns) -> Self {
         let mut visited = AHashSet::new();
         Self::from_value_inner(object, heap, &mut visited, interns)
     }
@@ -195,9 +195,9 @@ impl PyObject {
     /// The `visited` set tracks HeapIds we're currently processing. When we encounter
     /// a HeapId already in the set, we've found a cycle and return `PyObject::Cycle`
     /// with an appropriate placeholder string.
-    fn from_value_inner<T: ResourceTracker>(
+    fn from_value_inner(
         object: &Value,
-        heap: &Heap<T>,
+        heap: &Heap<impl ResourceTracker>,
         visited: &mut AHashSet<HeapId>,
         interns: &Interns,
     ) -> Self {

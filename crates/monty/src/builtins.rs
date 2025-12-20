@@ -12,6 +12,7 @@ use crate::exceptions::{exc_err_fmt, ExcType};
 
 use crate::heap::{Heap, HeapData};
 use crate::intern::Interns;
+use crate::io::PrintWriter;
 use crate::resource::ResourceTracker;
 use crate::run_frame::RunResult;
 use crate::types::PyTrait;
@@ -35,9 +36,16 @@ impl Builtins {
     /// * `heap` - The heap for allocating objects
     /// * `args` - The arguments to pass to the callable
     /// * `interns` - String storage for looking up interned names in error messages
-    pub fn call<T: ResourceTracker>(self, heap: &mut Heap<T>, args: ArgValues, interns: &Interns) -> RunResult<Value> {
+    /// * `writer` - The writer for print output
+    pub fn call(
+        self,
+        heap: &mut Heap<impl ResourceTracker>,
+        args: ArgValues,
+        interns: &Interns,
+        writer: &mut impl PrintWriter,
+    ) -> RunResult<Value> {
         match self {
-            Self::Function(b) => b.call(heap, args, interns),
+            Self::Function(b) => b.call(heap, args, interns, writer),
             Self::ExcType(exc) => exc.call(heap, args, interns),
         }
     }
@@ -92,33 +100,37 @@ impl BuiltinsFunctions {
     /// Executes the builtin with the provided positional arguments.
     ///
     /// The `interns` parameter provides access to interned string content for py_str and py_repr.
-    fn call<T: ResourceTracker>(self, heap: &mut Heap<T>, args: ArgValues, interns: &Interns) -> RunResult<Value> {
+    /// The `writer` parameter is used for print output.
+    fn call(
+        self,
+        heap: &mut Heap<impl ResourceTracker>,
+        args: ArgValues,
+        interns: &Interns,
+        writer: &mut impl PrintWriter,
+    ) -> RunResult<Value> {
         match self {
             Self::Print => {
-                match args {
+                match &args {
                     ArgValues::Zero => {}
                     ArgValues::One(a) => {
-                        println!("{}", a.py_str(heap, interns));
-                        a.drop_with_heap(heap);
+                        writer.stdout_write(a.py_str(heap, interns));
                     }
                     ArgValues::Two(a1, a2) => {
-                        println!("{} {}", a1.py_str(heap, interns), a2.py_str(heap, interns));
-                        a1.drop_with_heap(heap);
-                        a2.drop_with_heap(heap);
+                        writer.stdout_write(a1.py_str(heap, interns));
+                        writer.stdout_push(' ');
+                        writer.stdout_write(a2.py_str(heap, interns));
                     }
-                    ArgValues::Many(args) => {
-                        let mut iter = args.iter();
-                        print!("{}", iter.next().unwrap().py_str(heap, interns));
+                    ArgValues::Many(many) => {
+                        let mut iter = many.iter();
+                        writer.stdout_write(iter.next().unwrap().py_str(heap, interns));
                         for value in iter {
-                            print!(" {}", value.py_str(heap, interns));
-                        }
-                        println!();
-                        // Clean up all args
-                        for arg in args {
-                            arg.drop_with_heap(heap);
+                            writer.stdout_push(' ');
+                            writer.stdout_write(value.py_str(heap, interns));
                         }
                     }
                 }
+                writer.stdout_push('\n');
+                args.drop_with_heap(heap);
                 Ok(Value::None)
             }
             Self::Len => {

@@ -7,6 +7,7 @@ use crate::fstring::{fstring_interpolation, FStringPart};
 
 use crate::heap::{Heap, HeapData};
 use crate::intern::{ExtFunctionId, Interns};
+use crate::io::PrintWriter;
 use crate::namespace::{NamespaceId, Namespaces};
 use crate::operators::{CmpOperator, Operator};
 use crate::resource::ResourceTracker;
@@ -22,11 +23,12 @@ use crate::value::{Attr, Value};
 ///
 /// # Lifetimes
 /// * `'h` - Lifetime of the mutable borrows (namespaces and heap)
-/// * `'s` - Lifetime of the string storage
+/// * `'s` - Lifetime of the string storage and the print writer reference
 ///
 /// # Type Parameters
 /// * `T` - The resource tracker type for enforcing execution limits
-pub struct EvaluateExpr<'h, 's, T: ResourceTracker> {
+/// * `W` - The writer type for print output
+pub struct EvaluateExpr<'h, 's, T: ResourceTracker, W: PrintWriter> {
     /// The namespace stack containing all scopes (global, local, etc.)
     pub namespaces: &'h mut Namespaces,
     /// Index of the current local namespace in the namespace stack
@@ -35,6 +37,8 @@ pub struct EvaluateExpr<'h, 's, T: ResourceTracker> {
     pub heap: &'h mut Heap<T>,
     /// String storage for looking up interned names
     pub interns: &'s Interns,
+    /// Writer for print output
+    pub writer: &'s mut W,
 }
 
 /// Similar to the legacy `ok!()` macro, this gives shorthand for returning early
@@ -49,7 +53,7 @@ macro_rules! return_ext_call {
 }
 pub(crate) use return_ext_call;
 
-impl<'h, 's, T: ResourceTracker> EvaluateExpr<'h, 's, T> {
+impl<'h, 's, T: ResourceTracker, W: PrintWriter> EvaluateExpr<'h, 's, T, W> {
     /// Creates a new `EvaluateExpr` with the given evaluation context.
     ///
     /// # Arguments
@@ -57,17 +61,20 @@ impl<'h, 's, T: ResourceTracker> EvaluateExpr<'h, 's, T> {
     /// * `local_idx` - Index of the current local namespace
     /// * `heap` - The heap for object allocation
     /// * `interns` - String storage for looking up interned names
+    /// * `writer` - The writer for print output
     pub fn new(
         namespaces: &'h mut Namespaces,
         local_idx: NamespaceId,
         heap: &'h mut Heap<T>,
         interns: &'s Interns,
+        writer: &'s mut W,
     ) -> Self {
         Self {
             namespaces,
             local_idx,
             heap,
             interns,
+            writer,
         }
     }
 
@@ -86,7 +93,14 @@ impl<'h, 's, T: ResourceTracker> EvaluateExpr<'h, 's, T> {
                 .map(EvalResult::Value),
             Expr::Call { callable, args } => {
                 let args = return_ext_call!(self.evaluate_args(args)?);
-                callable.call(self.namespaces, self.local_idx, self.heap, args, self.interns)
+                callable.call(
+                    self.namespaces,
+                    self.local_idx,
+                    self.heap,
+                    args,
+                    self.interns,
+                    self.writer,
+                )
             }
             Expr::AttrCall { object, attr, args } => self.attr_call(object, attr, args),
             Expr::Op { left, op, right } => match op {
@@ -203,7 +217,14 @@ impl<'h, 's, T: ResourceTracker> EvaluateExpr<'h, 's, T> {
             }
             Expr::Call { callable, args } => {
                 let args = return_ext_call!(self.evaluate_args(args)?);
-                let eval_result = callable.call(self.namespaces, self.local_idx, self.heap, args, self.interns)?;
+                let eval_result = callable.call(
+                    self.namespaces,
+                    self.local_idx,
+                    self.heap,
+                    args,
+                    self.interns,
+                    self.writer,
+                )?;
                 let value = return_ext_call!(eval_result);
                 value.drop_with_heap(self.heap);
                 Ok(EvalResult::Value(()))

@@ -3,6 +3,7 @@ use crate::exceptions::{ExcType, InternalRunError, RunError};
 use crate::expressions::Node;
 use crate::heap::Heap;
 use crate::intern::{ExtFunctionId, Interns};
+use crate::io::{PrintWriter, StdPrint};
 use crate::namespace::Namespaces;
 use crate::object::PyObject;
 use crate::parse::parse;
@@ -68,6 +69,8 @@ impl Executor {
 
     /// Executes the code with the given input values.
     ///
+    /// Uses `StdPrint` for print output.
+    ///
     /// # Arguments
     /// * `inputs` - Values to fill the first N slots of the namespace (e.g., function parameters)
     ///
@@ -81,10 +84,12 @@ impl Executor {
     /// assert_eq!(py_object, monty::PyObject::Int(3));
     /// ```
     pub fn run_no_limits(&self, inputs: Vec<PyObject>) -> Result<PyObject, RunError> {
-        self.run_with_tracker(inputs, NoLimitTracker::default())
+        self.run_with_tracker(inputs, NoLimitTracker::default(), &mut StdPrint)
     }
 
     /// Executes the code with configurable resource limits.
+    ///
+    /// Uses `StdPrint` for print output.
     ///
     /// # Arguments
     /// * `inputs` - Values to fill the first N slots of the namespace
@@ -104,7 +109,18 @@ impl Executor {
     /// ```
     pub fn run_with_limits(&self, inputs: Vec<PyObject>, limits: ResourceLimits) -> Result<PyObject, RunError> {
         let resource_tracker = LimitedTracker::new(limits);
-        self.run_with_tracker(inputs, resource_tracker)
+        self.run_with_tracker(inputs, resource_tracker, &mut StdPrint)
+    }
+
+    /// Executes the code with a custom print writer.
+    ///
+    /// This allows capturing or redirecting print output from the executed code.
+    ///
+    /// # Arguments
+    /// * `inputs` - Values to fill the first N slots of the namespace
+    /// * `writer` - Custom print writer implementation
+    pub fn run_with_writer(&self, inputs: Vec<PyObject>, writer: &mut impl PrintWriter) -> Result<PyObject, RunError> {
+        self.run_with_tracker(inputs, NoLimitTracker::default(), writer)
     }
 
     /// Executes the code with a custom resource tracker.
@@ -116,19 +132,19 @@ impl Executor {
     /// # Arguments
     /// * `inputs` - Values to fill the first N slots of the namespace
     /// * `resource_tracker` - Custom resource tracker implementation
+    /// * `writer` - print writer implementation
     ///
-    /// # Type Parameters
-    /// * `T` - A type implementing `ResourceTracker`
-    fn run_with_tracker<T: ResourceTracker>(
+    fn run_with_tracker(
         &self,
         inputs: Vec<PyObject>,
-        resource_tracker: T,
+        resource_tracker: impl ResourceTracker,
+        writer: &mut impl PrintWriter,
     ) -> Result<PyObject, RunError> {
         let mut heap = Heap::new(self.namespace_size, resource_tracker);
         let mut namespaces = self.prepare_namespaces(inputs, &mut heap)?;
 
         let mut position_tracker = NoPositionTracker;
-        let mut frame = RunFrame::module_frame(&self.interns, &mut position_tracker);
+        let mut frame = RunFrame::module_frame(&self.interns, &mut position_tracker, writer);
         let frame_exit = frame.execute(&mut namespaces, &mut heap, &self.nodes);
 
         // Clean up the global namespace before returning (only needed with dec-ref-check)
@@ -160,7 +176,8 @@ impl Executor {
         let mut namespaces = self.prepare_namespaces(inputs, &mut heap)?;
 
         let mut position_tracker = NoPositionTracker;
-        let mut frame = RunFrame::module_frame(&self.interns, &mut position_tracker);
+        let mut print_writer = StdPrint;
+        let mut frame = RunFrame::module_frame(&self.interns, &mut position_tracker, &mut print_writer);
         // Use execute() instead of execute_py_object() so the return value stays alive
         // while we compute refcounts
         let frame_exit = frame.execute(&mut namespaces, &mut heap, &self.nodes)?;
@@ -199,10 +216,10 @@ impl Executor {
     ///
     /// Converts each `PyObject` input to a `Value`, allocating on the heap if needed.
     /// Returns the prepared Namespaces or an error if there are too many inputs or invalid input types.
-    fn prepare_namespaces<T: ResourceTracker>(
+    fn prepare_namespaces(
         &self,
         inputs: Vec<PyObject>,
-        heap: &mut Heap<T>,
+        heap: &mut Heap<impl ResourceTracker>,
     ) -> Result<Namespaces, InternalRunError> {
         let Some(extra) = self
             .namespace_size
@@ -239,8 +256,9 @@ impl Executor {
         mut heap: Heap<T>,
         mut namespaces: Namespaces,
         mut position_tracker: PositionTracker,
+        writer: &mut impl PrintWriter,
     ) -> Result<ExecProgress<T>, RunError> {
-        let mut frame = RunFrame::module_frame(&self.interns, &mut position_tracker);
+        let mut frame = RunFrame::module_frame(&self.interns, &mut position_tracker, writer);
         let exit = match frame.execute(&mut namespaces, &mut heap, &self.nodes) {
             Ok(exit) => exit,
             Err(e) => {
@@ -281,9 +299,9 @@ impl Executor {
     }
 }
 
-fn frame_exit_to_object<T: ResourceTracker>(
+fn frame_exit_to_object(
     opt_frame_exit: Option<FrameExit>,
-    heap: &mut Heap<T>,
+    heap: &mut Heap<impl ResourceTracker>,
     interns: &Interns,
 ) -> RunResult<PyObject> {
     match opt_frame_exit {
@@ -380,7 +398,7 @@ impl<T: ResourceTracker> FunctionCallExecutorState<T> {
     ///
     /// # Arguments
     /// * `return_value` - The value returned by the external function
-    pub fn run(mut self, return_value: PyObject) -> Result<ExecProgress<T>, RunError> {
+    pub fn run(mut self, return_value: PyObject, writer: &mut impl PrintWriter) -> Result<ExecProgress<T>, RunError> {
         // Convert PyObject to Value
         let value = return_value
             .to_value(&mut self.heap, &self.executor.interns)
@@ -390,7 +408,7 @@ impl<T: ResourceTracker> FunctionCallExecutorState<T> {
 
         // Continue execution from saved position
         self.executor
-            .run_from_position(self.heap, self.namespaces, self.position_stack.into())
+            .run_from_position(self.heap, self.namespaces, self.position_stack.into(), writer)
     }
 }
 
@@ -411,10 +429,10 @@ impl<T: ResourceTracker> FunctionCallExecutorState<T> {
 ///
 /// # Example
 /// ```
-/// use monty::{ExecutorIter, ExecProgress, NoLimitTracker, PyObject};
+/// use monty::{ExecutorIter, ExecProgress, NoLimitTracker, PyObject, StdPrint};
 ///
 /// let exec = ExecutorIter::new("x + 1", "test.py", &["x"], vec![]).unwrap();
-/// match exec.run_no_limits(vec![PyObject::Int(41)]).unwrap() {
+/// match exec.run_no_limits(vec![PyObject::Int(41)], &mut StdPrint).unwrap() {
 ///     ExecProgress::Complete(result) => assert_eq!(result, PyObject::Int(42)),
 ///     _ => panic!("unexpected function call"),
 /// }
@@ -460,8 +478,12 @@ impl ExecutorIter {
     /// - The number of inputs doesn't match the expected count
     /// - An input value is invalid (e.g., `PyObject::Repr`)
     /// - A runtime error occurs during execution
-    pub fn run_no_limits(self, inputs: Vec<PyObject>) -> Result<ExecProgress<NoLimitTracker>, RunError> {
-        self.run_with_tracker(inputs, NoLimitTracker::default())
+    pub fn run_no_limits(
+        self,
+        inputs: Vec<PyObject>,
+        writer: &mut impl PrintWriter,
+    ) -> Result<ExecProgress<NoLimitTracker>, RunError> {
+        self.run_with_tracker(inputs, NoLimitTracker::default(), writer)
     }
 
     /// Starts execution with the given inputs and resource limits, consuming self.
@@ -481,15 +503,31 @@ impl ExecutorIter {
         self,
         inputs: Vec<PyObject>,
         limits: ResourceLimits,
+        writer: &mut impl PrintWriter,
     ) -> Result<ExecProgress<LimitedTracker>, RunError> {
         let resource_tracker = LimitedTracker::new(limits);
-        self.run_with_tracker(inputs, resource_tracker)
+        self.run_with_tracker(inputs, resource_tracker, writer)
     }
 
-    fn run_with_tracker<T: ResourceTracker>(
+    /// Starts execution with the given inputs and resource tracker, consuming self.
+    ///
+    /// Creates the heap and namespaces, then begins execution.
+    ///
+    /// # Arguments
+    /// * `inputs` - Initial input values (must match length of `input_names` from `new()`)
+    /// * `resource_tracker` - Resource tracker for the execution
+    /// * `writer` - Writer for print output
+    ///
+    /// # Errors
+    /// Returns `RunError` if:
+    /// - The number of inputs doesn't match the expected count
+    /// - An input value is invalid (e.g., `PyObject::Repr`)
+    /// - A runtime error occurs during execution
+    pub fn run_with_tracker<T: ResourceTracker>(
         self,
         inputs: Vec<PyObject>,
         resource_tracker: T,
+        writer: &mut impl PrintWriter,
     ) -> Result<ExecProgress<T>, RunError> {
         let mut heap = Heap::new(self.executor.namespace_size, resource_tracker);
 
@@ -497,6 +535,7 @@ impl ExecutorIter {
 
         // Start execution from index 0 (beginning of code)
         let position_tracker = PositionTracker::default();
-        self.executor.run_from_position(heap, namespaces, position_tracker)
+        self.executor
+            .run_from_position(heap, namespaces, position_tracker, writer)
     }
 }

@@ -77,7 +77,7 @@ impl ArgValues {
     /// Converts the arguments into a Vec of PyObjects.
     ///
     /// This is used when passing arguments to external functions.
-    pub fn into_py_objects<T: ResourceTracker>(self, heap: &mut Heap<T>, interns: &Interns) -> Vec<PyObject> {
+    pub fn into_py_objects(self, heap: &mut Heap<impl ResourceTracker>, interns: &Interns) -> Vec<PyObject> {
         match self {
             Self::Zero => vec![],
             Self::One(a) => vec![PyObject::new(a, heap, interns)],
@@ -100,7 +100,7 @@ impl ArgValues {
     ///
     /// This must be called when discarding `ArgValues` that may contain `Value::Ref`
     /// variants to maintain correct reference counts on the heap.
-    pub fn drop_with_heap<T: ResourceTracker>(self, heap: &mut Heap<T>) {
+    pub fn drop_with_heap(self, heap: &mut Heap<impl ResourceTracker>) {
         match self {
             Self::Zero => {}
             Self::One(v) => v.drop_with_heap(heap),
