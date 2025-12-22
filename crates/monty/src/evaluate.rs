@@ -4,7 +4,7 @@ use crate::args::{ArgExprs, ArgValues, Kwarg, KwargsValues};
 use crate::callable::Callable;
 use crate::exceptions::{exc_err_fmt, internal_err, ExcType, InternalRunError, SimpleException};
 use crate::expressions::{Expr, ExprLoc, Identifier, NameScope};
-use crate::fstring::{fstring_interpolation, FStringPart};
+use crate::fstring::{fstring_interpolation, ConversionFlag, FStringPart};
 
 use crate::heap::{Heap, HeapData};
 use crate::intern::{ExtFunctionId, Interns, StringId};
@@ -489,7 +489,20 @@ impl<'h, 's, T: ResourceTracker, W: PrintWriter> EvaluateExpr<'h, 's, T, W> {
                     expr,
                     conversion,
                     format_spec,
+                    debug_prefix,
                 } => {
+                    // Handle debug prefix for `=` specifier (e.g., f'{a=}' outputs "a=<value>")
+                    if let Some(prefix_id) = debug_prefix {
+                        result.push_str(self.interns.get_str(*prefix_id));
+                    }
+
+                    // When debug_prefix is present and no explicit conversion, default to repr
+                    let effective_conversion = if debug_prefix.is_some() && *conversion == ConversionFlag::None {
+                        ConversionFlag::Repr
+                    } else {
+                        *conversion
+                    };
+
                     // Evaluate the expression
                     let value = return_ext_call!(self.evaluate_use(expr)?);
 
@@ -500,7 +513,7 @@ impl<'h, 's, T: ResourceTracker, W: PrintWriter> EvaluateExpr<'h, 's, T, W> {
                         self,
                         &mut result,
                         &value,
-                        *conversion,
+                        effective_conversion,
                         format_spec.as_ref()
                     )?);
 

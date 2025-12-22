@@ -11,7 +11,7 @@ use crate::exceptions::{exc_fmt, ExcType};
 use crate::expressions::ExprLoc;
 
 use crate::heap::{Heap, HeapData};
-use crate::intern::Interns;
+use crate::intern::{Interns, StringId};
 use crate::io::PrintWriter;
 use crate::resource::ResourceTracker;
 use crate::run_frame::RunResult;
@@ -60,6 +60,10 @@ pub enum FStringPart {
         conversion: ConversionFlag,
         /// Optional format specification (can contain nested interpolations)
         format_spec: Option<FormatSpec>,
+        /// Debug prefix for `=` specifier (e.g., "a=" for f'{a=}', " a = " for f'{ a = }').
+        /// When present, this text is prepended to the output and repr conversion is used
+        /// by default (unless an explicit conversion is specified).
+        debug_prefix: Option<StringId>,
     },
 }
 
@@ -350,7 +354,13 @@ fn evaluate_dynamic_format_spec(
     for part in parts {
         match part {
             FStringPart::Literal(s) => result.push_str(s),
-            FStringPart::Interpolation { expr, conversion, .. } => {
+            FStringPart::Interpolation {
+                expr,
+                conversion,
+                debug_prefix: _,
+                ..
+            } => {
+                // Note: debug_prefix is ignored in format specs - it's only used at the top level
                 let value = return_ext_call!(evaluator.evaluate_use(expr)?);
                 let converted = apply_conversion(&value, *conversion, evaluator.heap, evaluator.interns);
                 result.push_str(&converted);

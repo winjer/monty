@@ -902,6 +902,7 @@ impl<'i> Prepare<'i> {
                 expr,
                 conversion,
                 format_spec,
+                debug_prefix,
             } => {
                 let prepared_expr = Box::new(self.prepare_expression(*expr)?);
                 let prepared_spec = match format_spec {
@@ -919,6 +920,7 @@ impl<'i> Prepare<'i> {
                     expr: prepared_expr,
                     conversion,
                     format_spec: prepared_spec,
+                    debug_prefix,
                 })
             }
         }

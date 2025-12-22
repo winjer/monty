@@ -7,7 +7,7 @@ use ruff_python_ast::{
     InterpolatedStringElement, Keyword, Number, Operator as AstOperator, ParameterWithDefault, Stmt, UnaryOp,
 };
 use ruff_python_parser::parse_module;
-use ruff_text_size::TextRange;
+use ruff_text_size::{Ranged, TextRange};
 
 use crate::args::{ArgExprs, Kwarg};
 use crate::builtins::Builtins;
@@ -733,10 +733,17 @@ impl<'a> Parser<'a> {
                     Some(spec) => Some(self.parse_format_spec(spec)?),
                     None => None,
                 };
+                // Extract debug prefix for `=` specifier (e.g., f'{a=}' -> "a=")
+                let debug_prefix = interp.debug_text.as_ref().map(|dt| {
+                    let expr_text = &self.code[interp.expression.range()];
+                    self.interner
+                        .intern(&format!("{}{}{}", dt.leading, expr_text, dt.trailing))
+                });
                 Ok(FStringPart::Interpolation {
                     expr,
                     conversion,
                     format_spec,
+                    debug_prefix,
                 })
             }
         }
@@ -761,11 +768,13 @@ impl<'a> Parser<'a> {
                     has_interpolation = true;
                     let expr = Box::new(self.parse_expression((*interp.expression).clone())?);
                     let conversion = convert_conversion_flag(interp.conversion);
-                    // Format specs within format specs are not allowed in Python
+                    // Format specs within format specs are not allowed in Python,
+                    // and debug_prefix doesn't apply to nested interpolations
                     parts.push(FStringPart::Interpolation {
                         expr,
                         conversion,
                         format_spec: None,
+                        debug_prefix: None,
                     });
                 }
             }

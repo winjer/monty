@@ -223,3 +223,14 @@ assert f'{42!r:s}' == '42', 'conversion with type spec'
 # zero-padding should use sign-aware alignment
 x = -42
 assert f'{x:05d}' == '-0042', 'zero pad negative'
+
+# === Debug/self-documenting expressions (=) ===
+a = 42
+assert f'{a=}' == 'a=42', 'basic debug expression'
+assert f'{a = }' == 'a = 42', 'debug with spaces'
+name = 'test'
+assert f'{name=}' == "name='test'", 'debug uses repr for strings'
+assert f'{name = }' == "name = 'test'", 'debug uses repr for strings'
+assert f'{name=!s}' == 'name=test', 'debug with !s conversion'
+assert f'{name=!r}' == "name='test'", 'debug with !r conversion'
+assert f'{1+1=}' == '1+1=2', 'debug with expression'

@@ -12,6 +12,7 @@ Project goals:
 - **Performance**: Fast execution through compile-time optimizations and efficient memory layout
 - **Simplicity**: Clean, understandable implementation focused on a Python subset
 - **Snapshotting and iteration**: Plan is to allow code to be iteratively executed and snapshotted at each function call
+- Targets the latest stable version of Python, currently Python 3.14
 
 ## Build Commands
 
