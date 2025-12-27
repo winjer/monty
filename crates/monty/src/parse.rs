@@ -452,7 +452,10 @@ impl<'a> Parser<'a> {
                 }
                 Ok(ExprLoc::new(self.convert_range(range), Expr::Dict(pairs)))
             }
-            AstExpr::Set(_) => Err(ParseError::not_implemented("set literals")),
+            AstExpr::Set(ast::ExprSet { elts, range, .. }) => {
+                let elements: Result<Vec<_>, _> = elts.into_iter().map(|e| self.parse_expression(e)).collect();
+                Ok(ExprLoc::new(self.convert_range(range), Expr::Set(elements?)))
+            }
             AstExpr::ListComp(_) => Err(ParseError::not_implemented("list comprehensions")),
             AstExpr::SetComp(_) => Err(ParseError::not_implemented("set comprehensions")),
             AstExpr::DictComp(_) => Err(ParseError::not_implemented("dictionary comprehensions")),

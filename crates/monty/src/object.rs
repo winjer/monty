@@ -19,6 +19,7 @@ use crate::{
         bytes::{bytes_repr, Bytes},
         dict::Dict,
         list::List,
+        set::{FrozenSet, Set},
         str::{string_repr, Str},
         tuple::Tuple,
         PyTrait, Type,
@@ -85,6 +86,10 @@ pub enum PyObject {
     Tuple(Vec<PyObject>),
     /// Python dictionary (insertion-ordered mapping).
     Dict(IndexMap<PyObject, PyObject>),
+    /// Python set (mutable, unordered collection of unique elements).
+    Set(Vec<PyObject>),
+    /// Python frozenset (immutable, unordered collection of unique elements).
+    FrozenSet(Vec<PyObject>),
     /// Python exception with type and optional message argument.
     Exception {
         /// The exception type (e.g., `ValueError`, `TypeError`).
@@ -182,6 +187,26 @@ impl PyObject {
                     Dict::from_pairs(pairs?, heap, interns).expect("PyObject Dict should only contain hashable keys");
                 Ok(Value::Ref(heap.allocate(HeapData::Dict(dict))?))
             }
+            Self::Set(items) => {
+                let mut set = Set::new();
+                for item in items {
+                    let value = item.to_value(heap, interns)?;
+                    set.add(value, heap, interns)
+                        .map_err(|_| InvalidInputError::invalid_type("unhashable set element"))?;
+                }
+                Ok(Value::Ref(heap.allocate(HeapData::Set(set))?))
+            }
+            Self::FrozenSet(items) => {
+                let mut set = Set::new();
+                for item in items {
+                    let value = item.to_value(heap, interns)?;
+                    set.add(value, heap, interns)
+                        .map_err(|_| InvalidInputError::invalid_type("unhashable frozenset element"))?;
+                }
+                // Convert to frozenset by extracting storage
+                let frozenset = FrozenSet::from_set(set);
+                Ok(Value::Ref(heap.allocate(HeapData::FrozenSet(frozenset))?))
+            }
             Self::Exception { exc_type, arg } => {
                 let exc = SimpleException::new(exc_type, arg);
                 Ok(Value::Exc(exc))
@@ -262,6 +287,19 @@ impl PyObject {
                         }
                         Self::Dict(new_dict)
                     }
+                    HeapData::Set(set) => Self::Set(
+                        set.storage()
+                            .iter()
+                            .map(|obj| PyObject::from_value_inner(obj, heap, visited, interns))
+                            .collect(),
+                    ),
+                    HeapData::FrozenSet(frozenset) => Self::FrozenSet(
+                        frozenset
+                            .storage()
+                            .iter()
+                            .map(|obj| PyObject::from_value_inner(obj, heap, visited, interns))
+                            .collect(),
+                    ),
                     // Cells are internal closure implementation details
                     HeapData::Cell(inner) => {
                         // Show the cell's contents
@@ -351,6 +389,38 @@ impl PyObject {
                 }
                 f.write_char('}')
             }
+            Self::Set(s) => {
+                if s.is_empty() {
+                    f.write_str("set()")
+                } else {
+                    f.write_char('{')?;
+                    let mut iter = s.iter();
+                    if let Some(first) = iter.next() {
+                        first.repr_fmt(f)?;
+                        for item in iter {
+                            f.write_str(", ")?;
+                            item.repr_fmt(f)?;
+                        }
+                    }
+                    f.write_char('}')
+                }
+            }
+            Self::FrozenSet(fs) => {
+                f.write_str("frozenset(")?;
+                if !fs.is_empty() {
+                    f.write_char('{')?;
+                    let mut iter = fs.iter();
+                    if let Some(first) = iter.next() {
+                        first.repr_fmt(f)?;
+                        for item in iter {
+                            f.write_str(", ")?;
+                            item.repr_fmt(f)?;
+                        }
+                    }
+                    f.write_char('}')?;
+                }
+                f.write_char(')')
+            }
             Self::Exception { exc_type, arg } => {
                 let type_str: &'static str = exc_type.into();
                 write!(f, "{type_str}(")?;
@@ -388,6 +458,8 @@ impl PyObject {
             Self::List(l) => !l.is_empty(),
             Self::Tuple(t) => !t.is_empty(),
             Self::Dict(d) => !d.is_empty(),
+            Self::Set(s) => !s.is_empty(),
+            Self::FrozenSet(fs) => !fs.is_empty(),
             Self::Exception { .. } => true,
             Self::Repr(_) => true,
             Self::Cycle(_, _) => true,
@@ -411,6 +483,8 @@ impl PyObject {
             Self::List(_) => "list",
             Self::Tuple(_) => "tuple",
             Self::Dict(_) => "dict",
+            Self::Set(_) => "set",
+            Self::FrozenSet(_) => "frozenset",
             Self::Exception { .. } => "Exception",
             Self::Repr(_) => "repr",
             Self::Cycle(_, _) => "cycle",
@@ -456,6 +530,8 @@ impl PartialEq for PyObject {
             (Self::List(a), Self::List(b)) => a == b,
             (Self::Tuple(a), Self::Tuple(b)) => a == b,
             (Self::Dict(a), Self::Dict(b)) => a == b,
+            (Self::Set(a), Self::Set(b)) => a == b,
+            (Self::FrozenSet(a), Self::FrozenSet(b)) => a == b,
             (
                 Self::Exception {
                     exc_type: a_type,
@@ -643,6 +719,16 @@ impl Serialize for PyObject {
             Self::Tuple(items) => {
                 let mut map = serializer.serialize_map(Some(1))?;
                 map.serialize_entry("$tuple", items)?;
+                map.end()
+            }
+            Self::Set(items) => {
+                let mut map = serializer.serialize_map(Some(1))?;
+                map.serialize_entry("$set", items)?;
+                map.end()
+            }
+            Self::FrozenSet(items) => {
+                let mut map = serializer.serialize_map(Some(1))?;
+                map.serialize_entry("$frozenset", items)?;
                 map.end()
             }
             Self::Bytes(bytes) => {

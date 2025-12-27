@@ -13,7 +13,7 @@ use crate::namespace::{NamespaceId, Namespaces};
 use crate::operators::{CmpOperator, Operator};
 use crate::resource::ResourceTracker;
 use crate::run_frame::RunResult;
-use crate::types::{Dict, List, PyTrait, Str, Tuple};
+use crate::types::{Dict, List, PyTrait, Set, Str, Tuple};
 use crate::value::{Attr, Value};
 
 /// Container for evaluation context that holds all state needed during expression evaluation.
@@ -153,6 +153,15 @@ impl<'h, 's, T: ResourceTracker, W: PrintWriter> EvaluateExpr<'h, 's, T, W> {
                 let dict_id = self.heap.allocate(HeapData::Dict(dict))?;
                 Ok(EvalResult::Value(Value::Ref(dict_id)))
             }
+            Expr::Set(elements) => {
+                let mut set = Set::new();
+                for e in elements {
+                    let v = return_ext_call!(self.evaluate_use(e)?);
+                    set.add(v, self.heap, self.interns)?;
+                }
+                let set_id = self.heap.allocate(HeapData::Set(set))?;
+                Ok(EvalResult::Value(Value::Ref(set_id)))
+            }
             Expr::Not(operand) => {
                 let b = return_ext_call!(self.evaluate_bool(operand)?);
                 Ok(EvalResult::Value(Value::Bool(!b)))
@@ -274,6 +283,12 @@ impl<'h, 's, T: ResourceTracker, W: PrintWriter> EvaluateExpr<'h, 's, T, W> {
                 for (key_expr, value_expr) in pairs {
                     return_ext_call!(self.evaluate_discard(key_expr)?);
                     return_ext_call!(self.evaluate_discard(value_expr)?);
+                }
+                Ok(EvalResult::Value(()))
+            }
+            Expr::Set(elements) => {
+                for el in elements {
+                    return_ext_call!(self.evaluate_discard(el)?);
                 }
                 Ok(EvalResult::Value(()))
             }

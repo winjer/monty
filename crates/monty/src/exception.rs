@@ -139,6 +139,14 @@ impl ExcType {
         SimpleException::new(Self::KeyError, Some(key_str)).into()
     }
 
+    /// Creates a KeyError for popping from an empty set.
+    ///
+    /// Matches CPython's error format: `KeyError: 'pop from an empty set'`
+    #[must_use]
+    pub fn key_error_pop_empty_set() -> RunError {
+        exc_fmt!(Self::KeyError; "pop from an empty set").into()
+    }
+
     /// Creates a TypeError for when a function receives the wrong number of arguments.
     ///
     /// Matches CPython's error format exactly:
@@ -358,6 +366,14 @@ impl ExcType {
     #[must_use]
     pub fn runtime_error_dict_changed_size() -> RunError {
         exc_static!(Self::RuntimeError; "dictionary changed size during iteration").into()
+    }
+
+    /// Creates a RuntimeError for set mutation during iteration.
+    ///
+    /// Matches CPython's format: `RuntimeError: Set changed size during iteration`
+    #[must_use]
+    pub fn runtime_error_set_changed_size() -> RunError {
+        exc_static!(Self::RuntimeError; "Set changed size during iteration").into()
     }
 
     /// Creates a TypeError for functions that don't accept keyword arguments.
@@ -831,6 +847,24 @@ impl RunError {
 
     pub fn internal(msg: impl Into<Cow<'static, str>>) -> Self {
         Self::Internal(msg.into())
+    }
+
+    /// Sets the frame on the exception.
+    ///
+    /// Used when an exception is raised from code that doesn't have access to position
+    /// information (like `ForIterator::for_next`) but the caller does.
+    pub(crate) fn set_frame(self, frame: RawStackFrame) -> Self {
+        match self {
+            Self::Exc(mut exc) => {
+                exc.frame = Some(frame);
+                Self::Exc(exc)
+            }
+            Self::UncatchableExc(mut exc) => {
+                exc.frame = Some(frame);
+                Self::UncatchableExc(exc)
+            }
+            Self::Internal(_) => self, // Internal errors don't have frames
+        }
     }
 }
 

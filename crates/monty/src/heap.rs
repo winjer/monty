@@ -10,7 +10,7 @@ use crate::exception::ExcType;
 use crate::intern::{FunctionId, Interns};
 use crate::resource::{ResourceError, ResourceTracker};
 use crate::run_frame::RunResult;
-use crate::types::{Bytes, Dict, List, PyTrait, Str, Tuple, Type};
+use crate::types::{Bytes, Dict, FrozenSet, List, PyTrait, Set, Str, Tuple, Type};
 use crate::value::{Attr, Value};
 
 /// Unique identifier for values stored inside the heap arena.
@@ -40,6 +40,8 @@ pub enum HeapData {
     List(List),
     Tuple(Tuple),
     Dict(Dict),
+    Set(Set),
+    FrozenSet(FrozenSet),
     /// A closure: a function that captures variables from enclosing scopes.
     ///
     /// Contains a reference to the function definition, a vector of captured cell HeapIds,
@@ -93,6 +95,10 @@ impl HeapData {
                 }
                 Some(hasher.finish())
             }
+            Self::FrozenSet(fs) => {
+                // FrozenSet hash is XOR of element hashes (order-independent)
+                fs.compute_hash(heap, interns)
+            }
             Self::Closure(f, _, _) | Self::FunctionDefaults(f, _) => {
                 let mut hasher = DefaultHasher::new();
                 // TODO, this is NOT proper hashing, we should somehow hash the function properly
@@ -100,7 +106,7 @@ impl HeapData {
                 Some(hasher.finish())
             }
             // Mutable types cannot be hashed (Cell is handled specially in get_or_compute_hash)
-            Self::List(_) | Self::Dict(_) | Self::Cell(_) => None,
+            Self::List(_) | Self::Dict(_) | Self::Set(_) | Self::Cell(_) => None,
         }
     }
 }
@@ -117,6 +123,8 @@ impl PyTrait for HeapData {
             Self::List(l) => l.py_type(heap),
             Self::Tuple(t) => t.py_type(heap),
             Self::Dict(d) => d.py_type(heap),
+            Self::Set(s) => s.py_type(heap),
+            Self::FrozenSet(fs) => fs.py_type(heap),
             Self::Closure(_, _, _) | Self::FunctionDefaults(_, _) => Type::Function,
             Self::Cell(_) => Type::Cell,
         }
@@ -129,6 +137,8 @@ impl PyTrait for HeapData {
             Self::List(l) => l.py_estimate_size(),
             Self::Tuple(t) => t.py_estimate_size(),
             Self::Dict(d) => d.py_estimate_size(),
+            Self::Set(s) => s.py_estimate_size(),
+            Self::FrozenSet(fs) => fs.py_estimate_size(),
             // TODO: should include size of captured cells and defaults
             Self::Closure(_, _, _) | Self::FunctionDefaults(_, _) => 0,
             Self::Cell(v) => std::mem::size_of::<Value>() + v.py_estimate_size(),
@@ -142,6 +152,8 @@ impl PyTrait for HeapData {
             Self::List(l) => PyTrait::py_len(l, heap, interns),
             Self::Tuple(t) => PyTrait::py_len(t, heap, interns),
             Self::Dict(d) => PyTrait::py_len(d, heap, interns),
+            Self::Set(s) => PyTrait::py_len(s, heap, interns),
+            Self::FrozenSet(fs) => PyTrait::py_len(fs, heap, interns),
             _ => None, // Cells don't have length
         }
     }
@@ -153,6 +165,8 @@ impl PyTrait for HeapData {
             (Self::List(a), Self::List(b)) => a.py_eq(b, heap, interns),
             (Self::Tuple(a), Self::Tuple(b)) => a.py_eq(b, heap, interns),
             (Self::Dict(a), Self::Dict(b)) => a.py_eq(b, heap, interns),
+            (Self::Set(a), Self::Set(b)) => a.py_eq(b, heap, interns),
+            (Self::FrozenSet(a), Self::FrozenSet(b)) => a.py_eq(b, heap, interns),
             (Self::Closure(a_id, a_cells, _), Self::Closure(b_id, b_cells, _)) => *a_id == *b_id && a_cells == b_cells,
             (Self::FunctionDefaults(a_id, _), Self::FunctionDefaults(b_id, _)) => *a_id == *b_id,
             // Cells compare by identity only (handled at Value level via HeapId comparison)
@@ -168,6 +182,8 @@ impl PyTrait for HeapData {
             Self::List(l) => l.py_dec_ref_ids(stack),
             Self::Tuple(t) => t.py_dec_ref_ids(stack),
             Self::Dict(d) => d.py_dec_ref_ids(stack),
+            Self::Set(s) => s.py_dec_ref_ids(stack),
+            Self::FrozenSet(fs) => fs.py_dec_ref_ids(stack),
             Self::Closure(_, cells, defaults) => {
                 // Decrement ref count for captured cells
                 stack.extend(cells.iter().copied());
@@ -193,6 +209,8 @@ impl PyTrait for HeapData {
             Self::List(l) => l.py_bool(heap, interns),
             Self::Tuple(t) => t.py_bool(heap, interns),
             Self::Dict(d) => d.py_bool(heap, interns),
+            Self::Set(s) => s.py_bool(heap, interns),
+            Self::FrozenSet(fs) => fs.py_bool(heap, interns),
             Self::Closure(_, _, _) | Self::FunctionDefaults(_, _) => true,
             Self::Cell(_) => true, // Cells are always truthy
         }
@@ -211,6 +229,8 @@ impl PyTrait for HeapData {
             Self::List(l) => l.py_repr_fmt(f, heap, heap_ids, interns),
             Self::Tuple(t) => t.py_repr_fmt(f, heap, heap_ids, interns),
             Self::Dict(d) => d.py_repr_fmt(f, heap, heap_ids, interns),
+            Self::Set(s) => s.py_repr_fmt(f, heap, heap_ids, interns),
+            Self::FrozenSet(fs) => fs.py_repr_fmt(f, heap, heap_ids, interns),
             Self::Closure(f_id, _, _) | Self::FunctionDefaults(f_id, _) => {
                 interns.get_function(*f_id).py_repr_fmt(f, interns, 0)
             }
@@ -248,6 +268,8 @@ impl PyTrait for HeapData {
             (Self::List(a), Self::List(b)) => a.py_sub(b, heap),
             (Self::Tuple(a), Self::Tuple(b)) => a.py_sub(b, heap),
             (Self::Dict(a), Self::Dict(b)) => a.py_sub(b, heap),
+            (Self::Set(a), Self::Set(b)) => a.py_sub(b, heap),
+            (Self::FrozenSet(a), Self::FrozenSet(b)) => a.py_sub(b, heap),
             // Cells don't support arithmetic operations
             _ => Ok(None),
         }
@@ -307,6 +329,8 @@ impl PyTrait for HeapData {
             Self::List(l) => l.py_call_attr(heap, attr, args, interns),
             Self::Tuple(t) => t.py_call_attr(heap, attr, args, interns),
             Self::Dict(d) => d.py_call_attr(heap, attr, args, interns),
+            Self::Set(s) => s.py_call_attr(heap, attr, args, interns),
+            Self::FrozenSet(fs) => fs.py_call_attr(heap, attr, args, interns),
             _ => Err(ExcType::attribute_error(self.py_type(Some(heap)), attr)),
         }
     }
@@ -355,13 +379,16 @@ impl HashState {
     fn for_data(data: &HeapData) -> Self {
         match data {
             // Cells are hashable by identity (like all Python objects without __hash__ override)
+            // FrozenSet is immutable and hashable
             HeapData::Str(_)
             | HeapData::Bytes(_)
             | HeapData::Tuple(_)
+            | HeapData::FrozenSet(_)
             | HeapData::Cell(_)
             | HeapData::Closure(_, _, _)
             | HeapData::FunctionDefaults(_, _) => Self::Unknown,
-            HeapData::List(_) | HeapData::Dict(_) => Self::Unhashable,
+            // Mutable containers are unhashable
+            HeapData::List(_) | HeapData::Dict(_) | HeapData::Set(_) => Self::Unhashable,
         }
     }
 }
@@ -1048,6 +1075,20 @@ impl<T: ResourceTracker> Heap<T> {
                         work_list.push(*id);
                     }
                     if let Value::Ref(id) = v {
+                        work_list.push(*id);
+                    }
+                }
+            }
+            HeapData::Set(set) => {
+                for value in set.storage().iter() {
+                    if let Value::Ref(id) = value {
+                        work_list.push(*id);
+                    }
+                }
+            }
+            HeapData::FrozenSet(frozenset) => {
+                for value in frozenset.storage().iter() {
+                    if let Value::Ref(id) = value {
                         work_list.push(*id);
                     }
                 }

@@ -6,7 +6,7 @@ use crate::heap::Heap;
 use crate::intern::Interns;
 use crate::resource::ResourceTracker;
 use crate::run_frame::RunResult;
-use crate::types::{Bytes, Dict, List, PyTrait, Range, Str, Tuple};
+use crate::types::{Bytes, Dict, FrozenSet, List, PyTrait, Range, Set, Str, Tuple};
 use crate::value::Value;
 
 /// Represents the Python type of a value.
@@ -31,6 +31,9 @@ pub enum Type {
     List,
     Tuple,
     Dict,
+    Set,
+    #[strum(serialize = "frozenset")]
+    FrozenSet,
     #[strum(disabled)]
     Exception(ExcType),
     Function,
@@ -68,6 +71,8 @@ impl Type {
             Self::List => List::init(heap, args, interns),
             Self::Tuple => Tuple::init(heap, args, interns),
             Self::Dict => Dict::init(heap, args, interns),
+            Self::Set => Set::init(heap, args, interns),
+            Self::FrozenSet => FrozenSet::init(heap, args, interns),
             Self::Str => Str::init(heap, args, interns),
             Self::Bytes => Bytes::init(heap, args, interns),
             Self::Range => Range::init(heap, args),

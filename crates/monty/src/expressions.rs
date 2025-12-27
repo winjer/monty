@@ -119,6 +119,10 @@ pub enum Expr {
         index: Box<ExprLoc>,
     },
     Dict(Vec<(ExprLoc, ExprLoc)>),
+    /// Set literal expression: `{1, 2, 3}`.
+    ///
+    /// Note: `{}` is always a dict, not an empty set. Use `set()` for empty sets.
+    Set(Vec<ExprLoc>),
     /// Unary `not` expression - evaluates to the boolean negation of the operand's truthiness.
     Not(Box<ExprLoc>),
     /// Unary minus expression - negates a numeric value.

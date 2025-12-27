@@ -610,7 +610,8 @@ impl<'i, P: AbstractPositionTracker, W: PrintWriter> RunFrame<'i, P, W> {
                 Ok(None) => break, // Iteration complete
                 Err(e) => {
                     iter_value.drop_with_heap(heap);
-                    return Err(e);
+                    // Add frame info for errors from for_next (e.g., set/dict mutation during iteration)
+                    return Err(e.set_frame(self.stack_frame(iter.position)));
                 }
             };
 

@@ -59,6 +59,12 @@ enum ForIterValue {
     HeapBytes { heap_id: HeapId, len: usize },
     /// Iterating over interned bytes, yields `Value::Int` for each byte.
     InternBytes { bytes_id: BytesId, len: usize },
+    /// Iterating over a heap-allocated Set, yields cloned values.
+    /// Checks `len` against current set size to detect mutation (raises RuntimeError).
+    Set { heap_id: HeapId, len: usize },
+    /// Iterating over a heap-allocated FrozenSet, yields cloned values.
+    /// FrozenSets are immutable so we capture the length at construction.
+    FrozenSet { heap_id: HeapId, len: usize },
 }
 
 impl ForIterator {
@@ -180,6 +186,45 @@ impl ForIterator {
                 let bytes = interns.get_bytes(*bytes_id);
                 Ok(Some(Value::Int(i64::from(bytes[i]))))
             }
+            ForIterValue::Set { heap_id, len } => {
+                if self.index >= *len {
+                    return Ok(None);
+                }
+                let i = self.index;
+                self.index += 1;
+                let item = {
+                    let HeapData::Set(set) = heap.get(*heap_id) else {
+                        unreachable!("ForIterValue::Set should only hold set heap IDs")
+                    };
+                    // Check for set mutation - if size changed, raise RuntimeError
+                    if set.len() != *len {
+                        return Err(ExcType::runtime_error_set_changed_size());
+                    }
+                    set.storage()
+                        .value_at(i)
+                        .expect("index should be valid")
+                        .copy_for_extend()
+                };
+                Ok(Some(clone_and_inc_ref(item, heap)))
+            }
+            ForIterValue::FrozenSet { heap_id, len } => {
+                if self.index >= *len {
+                    return Ok(None);
+                }
+                let i = self.index;
+                self.index += 1;
+                let item = {
+                    let HeapData::FrozenSet(frozenset) = heap.get(*heap_id) else {
+                        unreachable!("ForIterValue::FrozenSet should only hold frozenset heap IDs")
+                    };
+                    frozenset
+                        .storage()
+                        .value_at(i)
+                        .expect("index should be valid")
+                        .copy_for_extend()
+                };
+                Ok(Some(clone_and_inc_ref(item, heap)))
+            }
         }
     }
 
@@ -212,9 +257,9 @@ impl ForIterator {
 
     /// Returns the remaining size for iterables based on current state.
     ///
-    /// For immutable types (Range, Tuple, Str, Bytes), returns the exact remaining count.
+    /// For immutable types (Range, Tuple, Str, Bytes, FrozenSet), returns the exact remaining count.
     /// For List, returns current length minus index (may change if list is mutated).
-    /// For Dict, returns the captured length minus index (used for size-change detection).
+    /// For Dict and Set, returns the captured length minus index (used for size-change detection).
     pub fn size_hint(&self, heap: &Heap<impl ResourceTracker>) -> usize {
         let len = match &self.iter_value {
             ForIterValue::Range { len, .. }
@@ -222,7 +267,9 @@ impl ForIterator {
             | ForIterValue::IterStr { len, .. }
             | ForIterValue::HeapBytes { len, .. }
             | ForIterValue::InternBytes { len, .. }
-            | ForIterValue::DictKeys { len, .. } => *len,
+            | ForIterValue::DictKeys { len, .. }
+            | ForIterValue::Set { len, .. }
+            | ForIterValue::FrozenSet { len, .. } => *len,
             ForIterValue::List { heap_id } => {
                 let HeapData::List(list) = heap.get(*heap_id) else {
                     unreachable!("ForIterValue::List should only hold list heap IDs")
@@ -303,6 +350,14 @@ impl ForIterValue {
             }),
             HeapData::Str(s) => Some(Self::from_str(s.as_str())),
             HeapData::Bytes(b) => Some(Self::HeapBytes { heap_id, len: b.len() }),
+            HeapData::Set(set) => Some(Self::Set {
+                heap_id,
+                len: set.len(),
+            }),
+            HeapData::FrozenSet(frozenset) => Some(Self::FrozenSet {
+                heap_id,
+                len: frozenset.len(),
+            }),
             // Closures, FunctionDefaults, and Cells are not iterable
             HeapData::Closure(_, _, _) | HeapData::FunctionDefaults(_, _) | HeapData::Cell(_) => None,
         }

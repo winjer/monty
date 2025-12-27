@@ -1148,20 +1148,38 @@ impl EitherStr {
     }
 }
 
-/// Attribute names for method calls on container types (list, dict).
+/// Attribute names for method calls on container types (list, dict, set).
 ///
 /// Uses strum `Display` derive with lowercase serialization.
 /// The `Other(String)` variant is a fallback for unknown/dynamic attribute names.
 #[derive(Debug, Clone, Display)]
 #[strum(serialize_all = "lowercase")]
 pub enum Attr {
+    // List methods
     Append,
     Insert,
+    // Dict methods
     Get,
     Keys,
     Values,
     Items,
+    // Shared methods
     Pop,
+    Clear,
+    Copy,
+    // Set methods
+    Add,
+    Remove,
+    Discard,
+    Update,
+    Union,
+    Intersection,
+    Difference,
+    #[strum(serialize = "symmetric_difference")]
+    SymmetricDifference,
+    Issubset,
+    Issuperset,
+    Isdisjoint,
     /// Fallback for unknown attribute names. Displays as the contained string.
     #[strum(default)]
     Other(String),
@@ -1177,6 +1195,19 @@ impl From<String> for Attr {
             "values" => Self::Values,
             "items" => Self::Items,
             "pop" => Self::Pop,
+            "clear" => Self::Clear,
+            "copy" => Self::Copy,
+            "add" => Self::Add,
+            "remove" => Self::Remove,
+            "discard" => Self::Discard,
+            "update" => Self::Update,
+            "union" => Self::Union,
+            "intersection" => Self::Intersection,
+            "difference" => Self::Difference,
+            "symmetric_difference" => Self::SymmetricDifference,
+            "issubset" => Self::Issubset,
+            "issuperset" => Self::Issuperset,
+            "isdisjoint" => Self::Isdisjoint,
             _ => Self::Other(name),
         }
     }

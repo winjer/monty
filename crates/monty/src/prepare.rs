@@ -496,6 +496,13 @@ impl<'i> Prepare<'i> {
                     .collect::<Result<_, ParseError>>()?;
                 Expr::Dict(prepared_pairs)
             }
+            Expr::Set(elements) => {
+                let expressions = elements
+                    .into_iter()
+                    .map(|e| self.prepare_expression(e))
+                    .collect::<Result<_, ParseError>>()?;
+                Expr::Set(expressions)
+            }
             Expr::Not(operand) => Expr::Not(Box::new(self.prepare_expression(*operand)?)),
             Expr::UnaryMinus(operand) => Expr::UnaryMinus(Box::new(self.prepare_expression(*operand)?)),
             Expr::FString(parts) => {
@@ -1189,7 +1196,7 @@ fn collect_referenced_names_from_expr(
         }
         Expr::Literal(_) => {}
         Expr::Builtin(_) => {}
-        Expr::List(items) | Expr::Tuple(items) => {
+        Expr::List(items) | Expr::Tuple(items) | Expr::Set(items) => {
             for item in items {
                 collect_referenced_names_from_expr(item, referenced, interner);
             }
