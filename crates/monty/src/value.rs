@@ -105,7 +105,7 @@ impl From<bool> for Value {
 }
 
 impl PyTrait for Value {
-    fn py_type(&self, heap: Option<&Heap<impl ResourceTracker>>) -> Type {
+    fn py_type(&self, heap: &Heap<impl ResourceTracker>) -> Type {
         match self {
             Self::Undefined => panic!("Cannot get type of undefined value"),
             Self::Ellipsis => Type::Ellipsis,
@@ -117,10 +117,7 @@ impl PyTrait for Value {
             Self::InternBytes(_) => Type::Bytes,
             Self::Builtin(c) => c.py_type(),
             Self::Function(_) | Self::ExtFunction(_) => Type::Function,
-            Self::Ref(id) => match heap {
-                Some(heap) => heap.get(*id).py_type(Some(heap)),
-                None => Type::Unknown,
-            },
+            Self::Ref(id) => heap.get(*id).py_type(heap),
             #[cfg(feature = "ref-count-panic")]
             Self::Dereferenced => panic!("Cannot access Dereferenced object"),
         }
@@ -215,7 +212,6 @@ impl PyTrait for Value {
         }
     }
 
-    #[allow(clippy::only_used_in_recursion)]
     fn py_cmp(&self, other: &Self, heap: &mut Heap<impl ResourceTracker>, interns: &Interns) -> Option<Ordering> {
         match (self, other) {
             (Self::Int(s), Self::Int(o)) => s.partial_cmp(o),
@@ -843,7 +839,7 @@ impl PyTrait for Value {
                 let id = *id;
                 heap.with_entry_mut(id, |heap, data| data.py_getitem(key, heap, interns))
             }
-            _ => Err(ExcType::type_error_not_sub(self.py_type(Some(heap)))),
+            _ => Err(ExcType::type_error_not_sub(self.py_type(heap))),
         }
     }
 
@@ -861,7 +857,7 @@ impl PyTrait for Value {
             }
             _ => Err(ExcType::type_error(&format!(
                 "'{}' object does not support item assignment",
-                self.py_type(Some(heap))
+                self.py_type(heap)
             ))),
         }
     }
@@ -1000,7 +996,7 @@ impl Value {
                     HeapData::FrozenSet(fset) => fset.contains(item, heap, interns),
                     HeapData::Str(s) => str_contains(s.as_str(), item, heap, interns),
                     other => {
-                        let type_name = other.py_type(Some(heap));
+                        let type_name = other.py_type(heap);
                         Err(ExcType::type_error(&format!(
                             "argument of type '{type_name}' is not iterable"
                         )))
@@ -1012,7 +1008,7 @@ impl Value {
                 str_contains(container_str, item, heap, interns)
             }
             _ => {
-                let type_name = self.py_type(Some(heap));
+                let type_name = self.py_type(heap);
                 Err(ExcType::type_error(&format!(
                     "argument of type '{type_name}' is not iterable"
                 )))
@@ -1053,11 +1049,11 @@ impl Value {
                     }
                 })
             } else {
-                let type_name = heap.get(heap_id).py_type(Some(heap));
+                let type_name = heap.get(heap_id).py_type(heap);
                 Err(ExcType::attribute_error(type_name, attr_name))
             }
         } else {
-            let type_name = self.py_type(Some(heap));
+            let type_name = self.py_type(heap);
             Err(ExcType::attribute_error(type_name, attr_name))
         }
     }
@@ -1100,12 +1096,12 @@ impl Value {
                     }
                 })
             } else {
-                let type_name = heap.get(heap_id).py_type(Some(heap));
+                let type_name = heap.get(heap_id).py_type(heap);
                 value.drop_with_heap(heap);
                 Err(ExcType::attribute_error_no_setattr(type_name, attr_name))
             }
         } else {
-            let type_name = self.py_type(Some(heap));
+            let type_name = self.py_type(heap);
             value.drop_with_heap(heap);
             Err(ExcType::attribute_error_no_setattr(type_name, attr_name))
         }
@@ -1130,8 +1126,8 @@ impl Value {
     /// - Right shifts > 63 return 0 (or -1 for negative numbers)
     pub fn py_bitwise(&self, other: &Self, op: BitwiseOp, heap: &Heap<impl ResourceTracker>) -> Result<Self, RunError> {
         // Capture types for error messages
-        let lhs_type = self.py_type(Some(heap));
-        let rhs_type = other.py_type(Some(heap));
+        let lhs_type = self.py_type(heap);
+        let rhs_type = other.py_type(heap);
 
         // Get integer values from lhs and rhs
         let lhs_int = match self {
@@ -1197,7 +1193,7 @@ impl Value {
         if let Self::Ref(id) = self {
             heap.call_attr(*id, attr, args, interns)
         } else {
-            Err(ExcType::attribute_error(self.py_type(Some(heap)), attr.as_str(interns)))
+            Err(ExcType::attribute_error(self.py_type(heap), attr.as_str(interns)))
         }
     }
 
