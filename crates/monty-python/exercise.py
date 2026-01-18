@@ -17,7 +17,7 @@ def main():
     start = time.perf_counter()
 
     for py_file in test_cases.glob('*.py'):
-        code = py_file.read_text()
+        code = py_file.read_text(encoding='utf-8')
 
         # Exercise parsing and type checking
         try:
