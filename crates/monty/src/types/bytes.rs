@@ -111,6 +111,50 @@ pub fn get_byte_at_index(bytes: &[u8], index: i64) -> Option<u8> {
     Some(bytes[idx])
 }
 
+/// Extracts a slice of a byte array.
+///
+/// Handles both positive and negative step values. For negative step,
+/// iterates backward from start down to (but not including) stop.
+/// The `stop` parameter uses a sentinel value of `len + 1` for negative
+/// step to indicate "go to the beginning".
+///
+/// Note: step must be non-zero (callers should validate this via `slice.indices()`).
+pub(crate) fn get_bytes_slice(bytes: &[u8], start: usize, stop: usize, step: i64) -> Vec<u8> {
+    let mut result = Vec::new();
+
+    // try_from succeeds for non-negative step; step==0 rejected upstream by slice.indices()
+    if let Ok(step_usize) = usize::try_from(step) {
+        // Positive step: iterate forward
+        let mut i = start;
+        while i < stop && i < bytes.len() {
+            result.push(bytes[i]);
+            i += step_usize;
+        }
+    } else {
+        // Negative step: iterate backward
+        // start is the highest index, stop is the sentinel
+        // stop > bytes.len() means "go to the beginning"
+        let step_abs = usize::try_from(-step).expect("step is negative so -step is positive");
+        let step_abs_i64 = i64::try_from(step_abs).expect("step magnitude fits in i64");
+        let mut i = i64::try_from(start).expect("start index fits in i64");
+        let stop_i64 = if stop > bytes.len() {
+            -1
+        } else {
+            i64::try_from(stop).expect("stop bounded by bytes.len() fits in i64")
+        };
+
+        while let Ok(i_usize) = usize::try_from(i) {
+            if i_usize >= bytes.len() || i <= stop_i64 {
+                break;
+            }
+            result.push(bytes[i_usize]);
+            i -= step_abs_i64;
+        }
+    }
+
+    result
+}
+
 /// Python bytes value stored on the heap.
 ///
 /// Wraps a `Vec<u8>` and provides Python-compatible operations.
@@ -231,6 +275,19 @@ impl PyTrait for Bytes {
     }
 
     fn py_getitem(&self, key: &Value, heap: &mut Heap<impl ResourceTracker>, _interns: &Interns) -> RunResult<Value> {
+        // Check for slice first (Value::Ref pointing to HeapData::Slice)
+        if let Value::Ref(id) = key
+            && let HeapData::Slice(slice) = heap.get(*id)
+        {
+            let (start, stop, step) = slice
+                .indices(self.0.len())
+                .map_err(|()| ExcType::value_error_slice_step_zero())?;
+
+            let sliced_bytes = get_bytes_slice(&self.0, start, stop, step);
+            let heap_id = heap.allocate(HeapData::Bytes(Self::new(sliced_bytes)))?;
+            return Ok(Value::Ref(heap_id));
+        }
+
         // Extract integer index, accepting both Int and Bool (True=1, False=0)
         let index = match key {
             Value::Int(i) => *i,

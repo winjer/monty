@@ -7,7 +7,7 @@ use crate::{
     intern::StringId,
     io::PrintWriter,
     resource::ResourceTracker,
-    types::{Dict, List, PyTrait, Set, Tuple, Type, str::allocate_char},
+    types::{Dict, List, PyTrait, Set, Slice, Tuple, Type, slice::value_to_option_i64, str::allocate_char},
     value::Value,
 };
 
@@ -52,6 +52,31 @@ impl<T: ResourceTracker, P: PrintWriter> VM<'_, T, P> {
             set.add(item, self.heap, self.interns)?;
         }
         let heap_id = self.heap.allocate(HeapData::Set(set))?;
+        self.push(Value::Ref(heap_id));
+        Ok(())
+    }
+
+    /// Builds a slice object from the top 3 stack values.
+    ///
+    /// Stack: [start, stop, step] -> [slice]
+    /// Each value can be None (for default) or an integer.
+    pub(super) fn build_slice(&mut self) -> Result<(), RunError> {
+        let step_val = self.pop();
+        let stop_val = self.pop();
+        let start_val = self.pop();
+
+        // Store results before dropping to avoid refcount leak on error
+        let start = value_to_option_i64(&start_val);
+        let stop = value_to_option_i64(&stop_val);
+        let step = value_to_option_i64(&step_val);
+
+        // Drop the values after extracting their integer content
+        start_val.drop_with_heap(self.heap);
+        stop_val.drop_with_heap(self.heap);
+        step_val.drop_with_heap(self.heap);
+
+        let slice = Slice::new(start?, stop?, step?);
+        let heap_id = self.heap.allocate(HeapData::Slice(slice))?;
         self.push(Value::Ref(heap_id));
         Ok(())
     }

@@ -16,8 +16,8 @@ use crate::{
     intern::{FunctionId, Interns},
     resource::{ResourceError, ResourceTracker},
     types::{
-        Bytes, Dataclass, Dict, FrozenSet, List, LongInt, Module, NamedTuple, PyTrait, Range, Set, Str, Tuple, Type,
-        str::allocate_char,
+        Bytes, Dataclass, Dict, FrozenSet, List, LongInt, Module, NamedTuple, PyTrait, Range, Set, Slice, Str, Tuple,
+        Type, str::allocate_char,
     },
     value::{Attr, Value},
 };
@@ -77,6 +77,11 @@ pub(crate) enum HeapData {
     /// Stored on the heap to keep `Value` enum small (16 bytes). Range objects
     /// are immutable and hashable.
     Range(Range),
+    /// A slice object (e.g., `slice(1, 10, 2)` or from `x[1:10:2]`).
+    ///
+    /// Stored on the heap to keep `Value` enum small. Slice objects represent
+    /// start:stop:step indices for sequence slicing operations.
+    Slice(Slice),
     /// An exception instance (e.g., `ValueError('message')`).
     ///
     /// Stored on the heap to keep `Value` enum small (16 bytes). Exceptions
@@ -160,7 +165,9 @@ impl HeapData {
             Self::Iterator(iter) => iter.has_refs(),
             Self::Module(m) => m.has_refs(),
             // Leaf types cannot have refs
-            Self::Str(_) | Self::Bytes(_) | Self::Range(_) | Self::Exception(_) | Self::LongInt(_) => false,
+            Self::Str(_) | Self::Bytes(_) | Self::Range(_) | Self::Slice(_) | Self::Exception(_) | Self::LongInt(_) => {
+                false
+            }
         }
     }
 
@@ -226,6 +233,15 @@ impl HeapData {
             }
             // Dataclass hashability depends on the mutable flag
             Self::Dataclass(dc) => dc.compute_hash(heap, interns),
+            // Slices are immutable and hashable (like in CPython)
+            Self::Slice(slice) => {
+                let mut hasher = DefaultHasher::new();
+                discriminant(self).hash(&mut hasher);
+                slice.start.hash(&mut hasher);
+                slice.stop.hash(&mut hasher);
+                slice.step.hash(&mut hasher);
+                Some(hasher.finish())
+            }
             // Mutable types, exceptions, iterators, and modules cannot be hashed
             // (Cell is handled specially in get_or_compute_hash)
             Self::List(_)
@@ -259,6 +275,7 @@ impl PyTrait for HeapData {
             Self::Closure(_, _, _) | Self::FunctionDefaults(_, _) => Type::Function,
             Self::Cell(_) => Type::Cell,
             Self::Range(_) => Type::Range,
+            Self::Slice(_) => Type::Slice,
             Self::Exception(e) => e.py_type(),
             Self::Dataclass(dc) => dc.py_type(heap),
             Self::Iterator(_) => Type::Iterator,
@@ -282,6 +299,7 @@ impl PyTrait for HeapData {
             Self::Closure(_, _, _) | Self::FunctionDefaults(_, _) => 0,
             Self::Cell(v) => std::mem::size_of::<Value>() + v.py_estimate_size(),
             Self::Range(_) => std::mem::size_of::<Range>(),
+            Self::Slice(s) => s.py_estimate_size(),
             Self::Exception(e) => std::mem::size_of::<SimpleException>() + e.arg().map_or(0, String::len),
             Self::Dataclass(dc) => dc.py_estimate_size(),
             Self::Iterator(_) => std::mem::size_of::<ForIterator>(),
@@ -301,10 +319,11 @@ impl PyTrait for HeapData {
             Self::Set(s) => PyTrait::py_len(s, heap, interns),
             Self::FrozenSet(fs) => PyTrait::py_len(fs, heap, interns),
             Self::Range(r) => Some(r.len()),
-            // Cells, Exceptions, Dataclasses, Iterators, LongInts, and Modules don't have length
+            // Cells, Slices, Exceptions, Dataclasses, Iterators, LongInts, and Modules don't have length
             Self::Cell(_)
             | Self::Closure(_, _, _)
             | Self::FunctionDefaults(_, _)
+            | Self::Slice(_)
             | Self::Exception(_)
             | Self::Dataclass(_)
             | Self::Iterator(_)
@@ -341,6 +360,8 @@ impl PyTrait for HeapData {
             (Self::Dataclass(a), Self::Dataclass(b)) => a.py_eq(b, heap, interns),
             // LongInt equality
             (Self::LongInt(a), Self::LongInt(b)) => a == b,
+            // Slice equality
+            (Self::Slice(a), Self::Slice(b)) => a.py_eq(b, heap, interns),
             // Cells, Exceptions, Iterators, and Modules compare by identity only (handled at Value level via HeapId comparison)
             (Self::Cell(_), Self::Cell(_))
             | (Self::Exception(_), Self::Exception(_))
@@ -378,8 +399,8 @@ impl PyTrait for HeapData {
             Self::Dataclass(dc) => dc.py_dec_ref_ids(stack),
             Self::Iterator(iter) => iter.py_dec_ref_ids(stack),
             Self::Module(m) => m.py_dec_ref_ids(stack),
-            // Range, Exception, and LongInt have no nested heap references
-            Self::Range(_) | Self::Exception(_) | Self::LongInt(_) => {}
+            // Range, Slice, Exception, and LongInt have no nested heap references
+            Self::Range(_) | Self::Slice(_) | Self::Exception(_) | Self::LongInt(_) => {}
         }
     }
 
@@ -396,6 +417,7 @@ impl PyTrait for HeapData {
             Self::Closure(_, _, _) | Self::FunctionDefaults(_, _) => true,
             Self::Cell(_) => true, // Cells are always truthy
             Self::Range(r) => r.py_bool(heap, interns),
+            Self::Slice(s) => s.py_bool(heap, interns),
             Self::Exception(_) => true, // Exceptions are always truthy
             Self::Dataclass(dc) => dc.py_bool(heap, interns),
             Self::Iterator(_) => true, // Iterators are always truthy
@@ -426,6 +448,7 @@ impl PyTrait for HeapData {
             // Cell repr shows the contained value's type
             Self::Cell(v) => write!(f, "<cell: {} object>", v.py_type(heap)),
             Self::Range(r) => r.py_repr_fmt(f, heap, heap_ids, interns),
+            Self::Slice(s) => s.py_repr_fmt(f, heap, heap_ids, interns),
             Self::Exception(e) => e.py_repr_fmt(f),
             Self::Dataclass(dc) => dc.py_repr_fmt(f, heap, heap_ids, interns),
             Self::Iterator(_) => write!(f, "<iterator>"),
@@ -607,6 +630,7 @@ impl HashState {
             // Cells are hashable by identity (like all Python objects without __hash__ override)
             // FrozenSet is immutable and hashable
             // Range is immutable and hashable
+            // Slice is immutable and hashable (like in CPython)
             // LongInt is immutable and hashable
             // NamedTuple is immutable and hashable (like Tuple)
             HeapData::Str(_)
@@ -618,6 +642,7 @@ impl HashState {
             | HeapData::Closure(_, _, _)
             | HeapData::FunctionDefaults(_, _)
             | HeapData::Range(_)
+            | HeapData::Slice(_)
             | HeapData::LongInt(_) => Self::Unknown,
             // Dataclass hashability depends on the mutable flag
             HeapData::Dataclass(dc) => {
@@ -1491,7 +1516,12 @@ impl<T: ResourceTracker> Heap<T> {
 fn collect_child_ids(data: &HeapData, work_list: &mut Vec<HeapId>) {
     match data {
         // Leaf types with no heap references
-        HeapData::Str(_) | HeapData::Bytes(_) | HeapData::Range(_) | HeapData::Exception(_) | HeapData::LongInt(_) => {}
+        HeapData::Str(_)
+        | HeapData::Bytes(_)
+        | HeapData::Range(_)
+        | HeapData::Exception(_)
+        | HeapData::LongInt(_)
+        | HeapData::Slice(_) => {}
         HeapData::List(list) => {
             // Skip iteration if no refs - major GC optimization for lists of primitives
             if !list.contains_refs() {

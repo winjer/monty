@@ -20,8 +20,9 @@ use crate::{
     resource::{LARGE_RESULT_THRESHOLD, ResourceTracker},
     types::{
         LongInt, PyTrait, Str, Tuple, Type,
-        bytes::{bytes_repr_fmt, get_byte_at_index},
-        str::{allocate_char, get_char_at_index, string_repr_fmt},
+        bytes::{bytes_repr_fmt, get_byte_at_index, get_bytes_slice},
+        slice,
+        str::{allocate_char, get_char_at_index, get_str_slice, string_repr_fmt},
     },
 };
 
@@ -1358,6 +1359,20 @@ impl PyTrait for Value {
                 heap.with_entry_mut(id, |heap, data| data.py_getitem(key, heap, interns))
             }
             Self::InternString(string_id) => {
+                // Check for slice first
+                if let Self::Ref(key_id) = key
+                    && let HeapData::Slice(slice_obj) = heap.get(*key_id)
+                {
+                    let s = interns.get_str(*string_id);
+                    let char_count = s.chars().count();
+                    let (start, stop, step) = slice_obj
+                        .indices(char_count)
+                        .map_err(|()| ExcType::value_error_slice_step_zero())?;
+                    let result_str = get_str_slice(s, start, stop, step);
+                    let heap_id = heap.allocate(HeapData::Str(Str::from(result_str)))?;
+                    return Ok(Self::Ref(heap_id));
+                }
+
                 // Handle interned string indexing, accepting Int and Bool
                 let index = match key {
                     Self::Int(i) => *i,
@@ -1370,6 +1385,19 @@ impl PyTrait for Value {
                 Ok(allocate_char(c, heap)?)
             }
             Self::InternBytes(bytes_id) => {
+                // Check for slice first
+                if let Self::Ref(key_id) = key
+                    && let HeapData::Slice(slice_obj) = heap.get(*key_id)
+                {
+                    let bytes = interns.get_bytes(*bytes_id);
+                    let (start, stop, step) = slice_obj
+                        .indices(bytes.len())
+                        .map_err(|()| ExcType::value_error_slice_step_zero())?;
+                    let result_bytes = get_bytes_slice(bytes, start, stop, step);
+                    let heap_id = heap.allocate(HeapData::Bytes(crate::types::Bytes::new(result_bytes)))?;
+                    return Ok(Self::Ref(heap_id));
+                }
+
                 // Handle interned bytes indexing - returns integer byte value
                 let index = match key {
                     Self::Int(i) => *i,
@@ -1666,6 +1694,15 @@ impl Value {
                     } else {
                         let exc_type = exc.py_type();
                         Err(ExcType::attribute_error(exc_type, attr_name))
+                    }
+                }
+                HeapData::Slice(slice) => {
+                    // Handle slice attributes: start, stop, step
+                    match attr_name {
+                        "start" => Ok(slice::option_i64_to_value(slice.start)),
+                        "stop" => Ok(slice::option_i64_to_value(slice.stop)),
+                        "step" => Ok(slice::option_i64_to_value(slice.step)),
+                        _ => Err(ExcType::attribute_error(Type::Slice, attr_name)),
                     }
                 }
                 _ => {
