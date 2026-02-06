@@ -17,9 +17,9 @@ name = "monty"
 path = "src/lib.rs"
 
 [dependencies]
-ruff_python_parser = { workspace = true }
-ruff_python_ast = { workspace = true }
-ruff_text_size = { workspace = true }
+ruff_python_parser = { workspace = true, optional = true }
+ruff_python_ast = { workspace = true, optional = true }
+ruff_text_size = { workspace = true, optional = true }
 ahash = { version = "0.8.0", features = ["serde"] }
 indexmap = { workspace = true }
 serde = { workspace = true }
@@ -31,6 +31,10 @@ num-traits = { workspace = true }
 num-integer = { workspace = true }
 
 [features]
+default = ["parser"]
+# Enables the ruff-based Python parser and compilation pipeline.
+# Disable this for embedded targets that only need to load pre-compiled bytecode.
+parser = ["dep:ruff_python_parser", "dep:ruff_python_ast", "dep:ruff_text_size"]
 # ref-count-return changes behavior to return information on reference counts to check they're correct
 # should be used for testing only
 ref-count-return = []

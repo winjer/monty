@@ -12,12 +12,15 @@
 //! - `compiler` - AST to bytecode compiler
 //! - `vm` - Virtual machine for bytecode execution
 
+#[cfg(feature = "parser")]
 mod builder;
 mod code;
+#[cfg(feature = "parser")]
 mod compiler;
 mod op;
 mod vm;
 
 pub use code::Code;
+#[cfg(feature = "parser")]
 pub use compiler::Compiler;
 pub use vm::{FrameExit, VM, VMSnapshot};

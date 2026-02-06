@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use crate::{
     ExcType, MontyException,
     asyncio::CallId,
-    bytecode::{Code, Compiler, FrameExit, VM, VMSnapshot},
+    bytecode::{Code, FrameExit, VM, VMSnapshot},
     exception_private::RunResult,
     heap::Heap,
     intern::{ExtFunctionId, Interns},
@@ -12,11 +12,11 @@ use crate::{
     namespace::Namespaces,
     object::MontyObject,
     os::OsFunction,
-    parse::parse,
-    prepare::prepare,
     resource::{NoLimitTracker, ResourceTracker},
     value::Value,
 };
+#[cfg(feature = "parser")]
+use crate::{bytecode::Compiler, parser::parse, prepare::prepare};
 
 /// Primary interface for running Monty code.
 ///
@@ -52,6 +52,9 @@ impl MontyRun {
     ///
     /// # Errors
     /// Returns `MontyException` if the code cannot be parsed.
+    ///
+    /// Requires the `parser` feature (enabled by default).
+    #[cfg(feature = "parser")]
     pub fn new(
         code: String,
         script_name: &str,
@@ -726,6 +729,7 @@ impl Clone for Executor {
     }
 }
 
+#[cfg(feature = "parser")]
 impl Executor {
     /// Creates a new executor with the given code, filename, input names, and external functions.
     fn new(
@@ -763,7 +767,9 @@ impl Executor {
             heap_capacity: AtomicUsize::new(prepared.namespace_size),
         })
     }
+}
 
+impl Executor {
     /// Executes the code with a custom resource tracker.
     ///
     /// This provides full control over resource tracking and garbage collection

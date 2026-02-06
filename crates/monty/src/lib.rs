@@ -16,6 +16,9 @@ mod namespace;
 mod object;
 mod os;
 mod parse;
+#[cfg(feature = "parser")]
+mod parser;
+#[cfg(feature = "parser")]
 mod prepare;
 mod resource;
 mod run;

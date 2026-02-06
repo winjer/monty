@@ -11,7 +11,8 @@ use crate::{
     fstring::{FStringPart, FormatSpec},
     intern::{InternerBuilder, StringId},
     namespace::NamespaceId,
-    parse::{CodeRange, ExceptHandler, ParseError, ParseNode, ParseResult, ParsedSignature, RawFunctionDef, Try},
+    parse::{CodeRange, ExceptHandler, ParseError, ParsedSignature, Try},
+    parser::{ParseNode, ParseResult, RawFunctionDef},
     signature::Signature,
 };
 

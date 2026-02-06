@@ -1,0 +1,25 @@
+[package]
+name = "monty-esp32"
+version = "0.1.0"
+edition = "2021"
+description = "Monty Python interpreter for M5Stack Cardputer (ESP32-S3)"
+
+[dependencies]
+# Monty runtime only — no parser (ruff is too large for ESP32)
+monty = { path = "../monty", default-features = false }
+
+# ESP-IDF framework (provides std support on ESP32-S3)
+esp-idf-svc = { version = "0.50", default-features = false, features = ["std", "binstart"] }
+esp-idf-hal = "0.45"
+
+# Display (ST7789V2 on the Cardputer, 240x135 LCD)
+mipidsi = "0.8"
+display-interface-spi = "0.5"
+embedded-graphics = "0.8"
+
+# Logging
+log = "0.4"
+
+[build-dependencies]
+embuild = { version = "0.32", features = ["espidf"] }
+

@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = ["crates/monty", "crates/monty-cli", "crates/monty-python", "crates/monty-js", "crates/monty-type-checking", "crates/monty-typeshed"]
+exclude = ["crates/monty-esp32"]
 
 [workspace.package]
 edition = "2024"
