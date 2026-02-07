@@ -1,0 +1,7 @@
+# Huzzah32 Feather: ESP32-WROOM-32, 4MB flash, no PSRAM
+
+# Flash size
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+
+# Stack size for main task
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=32768

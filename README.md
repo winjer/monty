@@ -32,6 +32,7 @@ What Monty **can** do:
 * Be snapshotted to bytes at external function calls, meaning you can store the interpreter state in a file or database, and resume later
 * Startup extremely fast (<1μs to go from code to execution result), and has runtime performance that is similar to CPython (generally between 5x faster and 5x slower)
 * Be called from Rust, Python, or Javascript - because Monty has no dependencies on cpython, you can use it anywhere you can run Rust
+* Run on embedded devices - the parser can be feature-gated out, and pre-compiled bytecode loaded on ESP32 microcontrollers
 * Control resource usage - Monty can track memory usage, allocations, stack depth, and execution time and cancel execution if it exceeds preset limits
 * Collect stdout and stderr and return it to the caller
 * Run async or sync code on the host via async or sync code on the host
@@ -236,6 +237,52 @@ let runner2 = MontyRun::load(&bytes).unwrap();
 let result = runner2.run(vec![MontyObject::Int(41)], NoLimitTracker, &mut StdPrint).unwrap();
 assert_eq!(result, MontyObject::Int(42));
 ```
+
+### ESP32 (Embedded)
+
+Monty can run on ESP32 microcontrollers by pre-compiling Python to bytecode on the host and loading it on the device. The `parser` feature is disabled for embedded builds, keeping the ruff dependency out of the firmware.
+
+Tested boards:
+
+| Board | Chip | Flash | RAM | Target |
+|-------|------|-------|-----|--------|
+| M5Stack Cardputer | ESP32-S3 | 8MB | 512KB SRAM | `xtensa-esp32s3-espidf` |
+| Adafruit Huzzah32 | ESP32 | 4MB | 520KB SRAM | `xtensa-esp32-espidf` |
+
+#### Prerequisites
+
+Install the ESP Xtensa Rust toolchain:
+
+```bash
+cargo +nightly install espup espflash ldproxy --locked
+espup install --targets esp32s3 --std
+```
+
+#### Compile and flash
+
+```bash
+# 1. Compile Python to bytecode on the host
+cargo +nightly run -p monty-cli -- compile script.py -o script.monty
+
+# 2. Copy the .monty file into crates/monty-esp32/ (it's embedded via include_bytes!)
+
+# 3. Build and flash (ESP32-S3 Cardputer)
+source ~/export-esp.sh
+cd crates/monty-esp32
+cargo +esp build --release
+espflash flash --chip esp32s3 --partition-table partitions.csv \
+  target/xtensa-esp32s3-espidf/release/monty-esp32
+
+# Or for ESP32 (Huzzah32)
+cargo +esp build --release --target xtensa-esp32-espidf
+espflash flash --chip esp32 --partition-table partitions-4mb.csv \
+  target/xtensa-esp32-espidf/release/monty-esp32
+
+# 4. Monitor serial output
+espflash monitor
+```
+
+The release binary is ~1.3MB, fitting comfortably in 4MB+ flash. Resource limits are configured for ~128KB heap to stay within the available SRAM.
 
 ## PydanticAI Integration
 

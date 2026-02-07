@@ -1,0 +1,4 @@
+# M5Stack Cardputer: ESP32-S3FN8, 8MB flash, no PSRAM
+
+# Flash size
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y

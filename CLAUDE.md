@@ -476,3 +476,57 @@ npm test
 - Tests use [ava](https://github.com/avajs/ava) and live in `crates/monty-js/__test__/`
 - Tests are written in TypeScript
 - Follow the existing test style in the `__test__/` directory
+
+## ESP32 Embedded (`monty-esp32`)
+
+The ESP32 crate runs pre-compiled Monty bytecode on ESP32 microcontrollers. It is **excluded from the workspace** because it requires the ESP Xtensa Rust toolchain (`cargo +esp`).
+
+### Architecture
+
+- The `parser` feature on the `monty` crate is **disabled** for embedded builds (`default-features = false`), so ruff is not compiled for the device
+- Python is compiled to bytecode on the host via `monty compile script.py -o script.monty`
+- Bytecode is embedded in the firmware via `include_bytes!()` or could be loaded from SD card
+- Output goes to serial via ESP-IDF logging (LCD display support is stubbed but not yet wired up)
+
+### Supported Boards
+
+| Board | Chip | Target | Flash | Partition table |
+|-------|------|--------|-------|-----------------|
+| M5Stack Cardputer | ESP32-S3 | `xtensa-esp32s3-espidf` (default) | 8MB | `partitions.csv` |
+| Adafruit Huzzah32 | ESP32 | `xtensa-esp32-espidf` | 4MB | `partitions-4mb.csv` |
+
+### Building and Flashing
+
+```bash
+# Install the ESP toolchain (one-time setup)
+cargo +nightly install espup espflash ldproxy --locked
+espup install --targets esp32s3 --std
+
+# Build for ESP32-S3 (Cardputer, default target)
+source ~/export-esp.sh
+cd crates/monty-esp32
+cargo +esp build --release
+espflash flash --chip esp32s3 --partition-table partitions.csv \
+  target/xtensa-esp32s3-espidf/release/monty-esp32
+
+# Build for ESP32 (Huzzah32)
+cargo +esp build --release --target xtensa-esp32-espidf
+espflash flash --chip esp32 --partition-table partitions-4mb.csv \
+  target/xtensa-esp32-espidf/release/monty-esp32
+```
+
+### Key files
+
+- `crates/monty-esp32/.cargo/config.toml` — target, linker, and `-Zbuild-std` config
+- `crates/monty-esp32/sdkconfig.defaults` — common ESP-IDF settings
+- `crates/monty-esp32/sdkconfig.defaults.esp32s3` — Cardputer-specific settings (8MB flash)
+- `crates/monty-esp32/sdkconfig.defaults.esp32` — Huzzah32-specific settings (4MB flash)
+- `crates/monty-esp32/partitions.csv` — custom partition table for 8MB flash (~4MB app)
+- `crates/monty-esp32/partitions-4mb.csv` — custom partition table for 4MB flash (~2MB app)
+
+### Important notes
+
+- The ESP32 crate uses `edition = "2021"` in its own Cargo.toml but the `monty` dependency uses edition 2024 via the workspace — this requires ESP toolchain rustc 1.90+
+- Debug builds are ~30MB (too large for flash) — always use `--release`
+- No PSRAM is assumed on either board — heap limit is set to 128KB
+- The `.embuild/` directory (ESP-IDF build cache) is gitignored and can be large (~700MB)

@@ -1,8 +1,4 @@
-# M5StampS3 has no external PSRAM — do NOT enable SPIRAM
-# (The ESP32-S3FN8 chip has 512KB SRAM + 8MB flash only)
-
-# Flash size (8MB on the Cardputer)
-CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+# Common settings for all ESP32 targets
 
 # Stack size for main task — Monty VM needs room for Python recursion
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=32768
